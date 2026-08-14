@@ -44,11 +44,11 @@ import type Redis from "ioredis";
 
 /** Context object passed to every task handler invocation. */
 export interface TaskContext {
-  taskId:        string;
-  type:          string;
-  workerId:      string;
+  taskId: string;
+  type: string;
+  workerId: string;
   /** Zero-indexed retry number (0 = first attempt). */
-  retryCount:    number;
+  retryCount: number;
   /** Human-friendly attempt number (retryCount + 1). */
   attemptNumber: number;
   /**
@@ -62,7 +62,7 @@ export interface TaskContext {
 /** Signature all task handlers must implement. */
 export type TaskHandlerFn = (
   payload: Record<string, unknown>,
-  ctx:     TaskContext,
+  ctx: TaskContext,
 ) => Promise<void>;
 
 // -----------------------------------------------------------------------------
@@ -71,10 +71,10 @@ export type TaskHandlerFn = (
 
 interface ConsumedMessage {
   streamKey: string;
-  entryId:   string;
-  taskId:    string;
-  type:      string;
-  priority:  TaskPriority;
+  entryId: string;
+  taskId: string;
+  type: string;
+  priority: TaskPriority;
 }
 
 /** ioredis XREADGROUP return shape (entries may be null for deleted messages). */
@@ -85,9 +85,9 @@ type XReadGroupResponse = Array<[string, Array<[string, string[] | null]>]> | nu
 // -----------------------------------------------------------------------------
 
 const PRIORITY_ORDER: Record<string, number> = {
-  [TaskPriority.HIGH]:   0,
+  [TaskPriority.HIGH]: 0,
   [TaskPriority.MEDIUM]: 1,
-  [TaskPriority.LOW]:    2,
+  [TaskPriority.LOW]: 2,
 };
 
 // -----------------------------------------------------------------------------
@@ -95,22 +95,22 @@ const PRIORITY_ORDER: Record<string, number> = {
 // -----------------------------------------------------------------------------
 
 export class WorkerService {
-  private readonly redis:         Redis;
+  private readonly redis: Redis;
   private readonly blockingRedis: Redis;
   private readonly handlers: Map<string, TaskHandlerFn> = new Map();
 
-  private workerId      = "";
-  private running       = false;
-  private activeCount   = 0;
+  private workerId = "";
+  private running = false;
+  private activeCount = 0;
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
-  private readonly concurrency:    number;
+  private readonly concurrency: number;
   private readonly blockTimeoutMs: number;
 
   constructor() {
-    this.redis          = getRedisClient();
-    this.blockingRedis  = getBlockingRedisClient();
-    this.concurrency    = config.WORKER_CONCURRENCY;
+    this.redis = getRedisClient();
+    this.blockingRedis = getBlockingRedisClient();
+    this.concurrency = config.WORKER_CONCURRENCY;
     this.blockTimeoutMs = config.WORKER_BLOCK_TIMEOUT_MS;
   }
 
@@ -133,9 +133,9 @@ export class WorkerService {
     // Create a Worker record in Postgres — its UUID becomes the workerId
     const worker = await db.worker.create({
       data: {
-        hostname:    os.hostname(),
-        pid:         process.pid,
-        status:      WorkerStatus.IDLE,
+        hostname: os.hostname(),
+        pid: process.pid,
+        status: WorkerStatus.IDLE,
         concurrency: this.concurrency,
       },
       select: { id: true },
@@ -143,9 +143,9 @@ export class WorkerService {
     this.workerId = worker.id;
 
     logger.info("[Worker] Started", {
-      workerId:    this.workerId,
-      hostname:    os.hostname(),
-      pid:         process.pid,
+      workerId: this.workerId,
+      hostname: os.hostname(),
+      pid: process.pid,
       concurrency: this.concurrency,
     });
 
@@ -158,7 +158,7 @@ export class WorkerService {
 
   async stop(): Promise<void> {
     logger.info("[Worker] Shutting down…", {
-      workerId:    this.workerId,
+      workerId: this.workerId,
       activeCount: this.activeCount,
     });
 
@@ -184,7 +184,7 @@ export class WorkerService {
     if (this.workerId !== "") {
       await db.worker.update({
         where: { id: this.workerId },
-        data:  { status: WorkerStatus.OFFLINE },
+        data: { status: WorkerStatus.OFFLINE },
       });
     }
 
@@ -261,6 +261,10 @@ export class WorkerService {
         }
       } catch (err) {
         logger.error(`[Worker ${this.workerId}] Uncaught error in consumer loop`, err);
+        if ((err as Error).message?.includes('NOGROUP')) {
+          logger.warn('[Worker] Consumer group missing \u2014 recreating', { workerId: this.workerId });
+          await this.initConsumerGroups();
+        }
         // CRITICAL FIX: Sleep to prevent infinite CPU spinning on error
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
@@ -276,10 +280,10 @@ export class WorkerService {
    *  2. If all empty: blocking XREADGROUP across all three (sorted by priority)
    */
   private async fetchMessages(maxCount: number): Promise<ConsumedMessage[]> {
-    const highKey   = RedisKeys.priorityStream(TaskPriority.HIGH);
+    const highKey = RedisKeys.priorityStream(TaskPriority.HIGH);
     const mediumKey = RedisKeys.priorityStream(TaskPriority.MEDIUM);
-    const lowKey    = RedisKeys.priorityStream(TaskPriority.LOW);
-    
+    const lowKey = RedisKeys.priorityStream(TaskPriority.LOW);
+
     const STREAMS = [highKey, mediumKey, lowKey];
 
     // Non-blocking priority sweep
@@ -319,7 +323,7 @@ export class WorkerService {
         "GROUP", STREAM_CONSUMER_GROUP, this.workerId,
         "COUNT", maxCount,
         "BLOCK", this.blockTimeoutMs,
-        "STREAMS", 
+        "STREAMS",
         ...STREAMS,
         ">", ">", ">" // Critical: Must have one '>' for EACH stream listed above
       )) as XReadGroupResponse;
@@ -362,12 +366,12 @@ export class WorkerService {
 
     // 1. Load full task record
     const task = await db.task.findUnique({
-      where:  { id: taskId },
+      where: { id: taskId },
       select: {
-        id:         true,
-        type:       true,
-        status:     true,
-        payload:    true,
+        id: true,
+        type: true,
+        status: true,
+        payload: true,
         retryCount: true,
         maxRetries: true,
       },
@@ -381,8 +385,8 @@ export class WorkerService {
 
     // Already in a terminal or cancelled state — nothing to do
     if (
-      task.status === TaskStatus.COMPLETED  ||
-      task.status === TaskStatus.CANCELLED  ||
+      task.status === TaskStatus.COMPLETED ||
+      task.status === TaskStatus.CANCELLED ||
       task.status === TaskStatus.DEAD_LETTER
     ) {
       logger.info("[Worker] Task already terminal — ACK-ing", { taskId, status: task.status });
@@ -404,9 +408,9 @@ export class WorkerService {
     await db.task.update({
       where: { id: taskId },
       data: {
-        status:     TaskStatus.RUNNING,
+        status: TaskStatus.RUNNING,
         lockedById: this.workerId,
-        lockedAt:   new Date(),
+        lockedAt: new Date(),
         executedAt: new Date(),
       },
     });
@@ -415,9 +419,9 @@ export class WorkerService {
       data: {
         taskId,
         workerId: this.workerId,
-        level:    LogLevel.INFO,
-        event:    "task.started",
-        message:  `Worker ${this.workerId} started executing task`,
+        level: LogLevel.INFO,
+        event: "task.started",
+        message: `Worker ${this.workerId} started executing task`,
         metadata: { retryCount: task.retryCount, attemptNumber: task.retryCount + 1 },
       },
     });
@@ -437,11 +441,11 @@ export class WorkerService {
 
       const ctx: TaskContext = {
         taskId,
-        type:          task.type,
-        workerId:      this.workerId,
-        retryCount:    task.retryCount,
+        type: task.type,
+        workerId: this.workerId,
+        retryCount: task.retryCount,
         attemptNumber: task.retryCount + 1,
-        renewLock:     async () => {
+        renewLock: async () => {
           await renewTaskLock(this.redis, taskId, this.workerId);
         },
       };
@@ -454,11 +458,11 @@ export class WorkerService {
       await db.task.update({
         where: { id: taskId },
         data: {
-          status:      TaskStatus.COMPLETED,
+          status: TaskStatus.COMPLETED,
           completedAt: new Date(),
-          lockedById:  null,
-          lockedAt:    null,
-          result:      { success: true, durationMs },
+          lockedById: null,
+          lockedAt: null,
+          result: { success: true, durationMs },
         },
       });
 
@@ -466,21 +470,21 @@ export class WorkerService {
         data: {
           taskId,
           workerId: this.workerId,
-          level:    LogLevel.INFO,
-          event:    "task.completed",
-          message:  "Task completed successfully",
+          level: LogLevel.INFO,
+          event: "task.completed",
+          message: "Task completed successfully",
           metadata: { durationMs },
         },
       });
 
       logger.info("[Worker] Task completed", { taskId, durationMs });
     } catch (err) {
-      const error      = err as Error;
+      const error = err as Error;
       const durationMs = Date.now() - startedAt;
 
       logger.error("[Worker] Task failed", {
         taskId,
-        error:      error.message,
+        error: error.message,
         durationMs,
       });
 
@@ -497,30 +501,30 @@ export class WorkerService {
    * Routes a failed task to either exponential-backoff retry or the dead-letter queue.
    */
   private async handleFailure(
-    taskId:     string,
-    type:       string,
-    priority:   TaskPriority,
+    taskId: string,
+    type: string,
+    priority: TaskPriority,
     retryCount: number,
     maxRetries: number,
-    error:      Error,
+    error: Error,
   ): Promise<void> {
     const db = getDb();
 
     if (retryCount < maxRetries) {
       // Exponential backoff: 2^attempt seconds, capped at 1 hour
       const backoffMs = Math.min(Math.pow(2, retryCount) * 1_000, 3_600_000);
-      const retryAt   = new Date(Date.now() + backoffMs);
+      const retryAt = new Date(Date.now() + backoffMs);
 
       await this.redis.zadd(RedisKeys.delayedQueue(), retryAt.getTime(), taskId);
 
       await db.task.update({
         where: { id: taskId },
         data: {
-          status:     TaskStatus.RETRYING,
+          status: TaskStatus.RETRYING,
           retryCount: { increment: 1 },
           lockedById: null,
-          lockedAt:   null,
-          result:     { success: false, error: error.message },
+          lockedAt: null,
+          result: { success: false, error: error.message },
         },
       });
 
@@ -528,12 +532,12 @@ export class WorkerService {
         data: {
           taskId,
           workerId: this.workerId,
-          level:    LogLevel.WARN,
-          event:    "task.retrying",
-          message:  `Task failed — retry ${retryCount + 1}/${maxRetries} in ${backoffMs}ms`,
+          level: LogLevel.WARN,
+          event: "task.retrying",
+          message: `Task failed — retry ${retryCount + 1}/${maxRetries} in ${backoffMs}ms`,
           metadata: {
-            error:   error.message,
-            stack:   error.stack,
+            error: error.message,
+            stack: error.stack,
             retryAt: retryAt.toISOString(),
             backoffMs,
           },
@@ -551,22 +555,22 @@ export class WorkerService {
       await this.redis.xadd(
         RedisKeys.deadLetterStream(),
         "*",
-        "taskId",        taskId,
-        "type",          type,
-        "priority",      priority,
-        "reason",        "max_retries_exceeded",
-        "errorMessage",  error.message,
+        "taskId", taskId,
+        "type", type,
+        "priority", priority,
+        "reason", "max_retries_exceeded",
+        "errorMessage", error.message,
         "deadLetteredAt", new Date().toISOString(),
       );
 
       await db.task.update({
         where: { id: taskId },
         data: {
-          status:      TaskStatus.DEAD_LETTER,
+          status: TaskStatus.DEAD_LETTER,
           completedAt: new Date(),
-          lockedById:  null,
-          lockedAt:    null,
-          result:      { success: false, error: error.message, deadLettered: true },
+          lockedById: null,
+          lockedAt: null,
+          result: { success: false, error: error.message, deadLettered: true },
         },
       });
 
@@ -574,9 +578,9 @@ export class WorkerService {
         data: {
           taskId,
           workerId: this.workerId,
-          level:    LogLevel.ERROR,
-          event:    "task.dead_lettered",
-          message:  `Task exhausted ${maxRetries} retries — moved to dead-letter queue`,
+          level: LogLevel.ERROR,
+          event: "task.dead_lettered",
+          message: `Task exhausted ${maxRetries} retries — moved to dead-letter queue`,
           metadata: { error: error.message, maxRetries },
         },
       });
@@ -596,8 +600,8 @@ export class WorkerService {
  */
 function parseStreamEntry(
   streamKey: string,
-  entryId:   string,
-  fields:    string[] | null,
+  entryId: string,
+  fields: string[] | null,
 ): ConsumedMessage | null {
   // Null fields = Redis stream tombstone (entry was deleted, skip it)
   if (fields === null) return null;
