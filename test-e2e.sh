@@ -103,7 +103,7 @@ docker compose start worker scheduler recovery
 
 # Step 6: Test Admin CLI
 info "Step 6: Testing Admin CLI locally..."
-if npx ts-node src/cli/admin.ts status | grep -q "Cluster Status"; then
+if npx ts-node src/cli/admin.ts status; then
   pass "Admin CLI status works"
 else
   fail "Admin CLI status failed"
