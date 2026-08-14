@@ -261,7 +261,8 @@ export class WorkerService {
         }
       } catch (err) {
         logger.error(`[Worker ${this.workerId}] Uncaught error in consumer loop`, err);
-        await sleep(1000);
+        // CRITICAL FIX: Sleep to prevent infinite CPU spinning on error
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
@@ -278,8 +279,11 @@ export class WorkerService {
     const highKey   = RedisKeys.priorityStream(TaskPriority.HIGH);
     const mediumKey = RedisKeys.priorityStream(TaskPriority.MEDIUM);
     const lowKey    = RedisKeys.priorityStream(TaskPriority.LOW);
+    
+    const STREAMS = [highKey, mediumKey, lowKey];
+
     // Non-blocking priority sweep
-    for (const streamKey of [highKey, mediumKey, lowKey]) {
+    for (const streamKey of STREAMS) {
       try {
         logger.debug(`[Worker ${this.workerId}] xreadgroup (non-blocking) on ${streamKey}`);
         const raw = (await this.blockingRedis.xreadgroup(
@@ -302,19 +306,22 @@ export class WorkerService {
           continue;
         }
         logger.error('[Worker Loop Error]', err);
-        await sleep(1000);
+        // CRITICAL FIX: Sleep to prevent infinite CPU spinning on error
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
     // All queues empty - block across all three and sort result by priority
     try {
       logger.debug(`[Worker ${this.workerId}] xreadgroup (blocking) across all streams for ${this.blockTimeoutMs}ms...`);
+      // 2. Correct ioredis syntax for multiple streams
       const raw = (await this.blockingRedis.xreadgroup(
         "GROUP", STREAM_CONSUMER_GROUP, this.workerId,
         "COUNT", maxCount,
         "BLOCK", this.blockTimeoutMs,
-        "STREAMS", highKey, mediumKey, lowKey,
-        ">", ">", ">",
+        "STREAMS", 
+        ...STREAMS,
+        ">", ">", ">" // Critical: Must have one '>' for EACH stream listed above
       )) as XReadGroupResponse;
 
       if (raw === null) return [];
@@ -340,7 +347,8 @@ export class WorkerService {
         return [];
       }
       logger.error('[Worker Loop Error]', err);
-      await sleep(1000); // Backoff delay
+      // 3. CRITICAL FIX: Sleep to prevent infinite CPU spinning on error
+      await new Promise(resolve => setTimeout(resolve, 1000));
       return [];
     }
   }
