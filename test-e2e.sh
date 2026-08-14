@@ -84,12 +84,18 @@ fi
 
 # Step 5: Run Engine Verification script via API container
 info "Step 5: Running Engine Verification script inside API container..."
+info "Pausing background cluster services so they don't steal test messages..."
+docker compose stop worker scheduler recovery
+
 # Run the compiled .js version since this is the production container!
 if docker compose exec api node dist/scripts/verify-engine.js; then
   pass "Engine verification suite passed!"
 else
   fail "Engine verification suite failed!"
 fi
+
+info "Restarting background cluster services..."
+docker compose start worker scheduler recovery
 
 # Step 6: Test Admin CLI
 info "Step 6: Testing Admin CLI inside API container..."
