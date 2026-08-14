@@ -1,14 +1,14 @@
-# -----------------------------------------------------------------------------
-# Distributed Task Scheduler — Multi-Container Orchestration
+ï»¿# -----------------------------------------------------------------------------
+# Distributed Task Scheduler ï¿½ Multi-Container Orchestration
 #
 # Services:
-#   postgres   — PostgreSQL 16 (single source of truth)
-#   redis      — Redis 7.2 (hot path: streams, locks, heartbeats)
-#   migrate    — One-shot Prisma migration runner (exits after deploy)
-#   api        — Express REST API + Socket.IO dashboard (port 3000)
-#   scheduler  — Single-instance leader scheduler (promotes delayed tasks)
-#   worker     — Stateless execution engine  — scale: --scale worker=N
-#   recovery   — Stale lock / orphaned task sweeper
+#   postgres   ï¿½ PostgreSQL 16 (single source of truth)
+#   redis      ï¿½ Redis 7.2 (hot path: streams, locks, heartbeats)
+#   migrate    ï¿½ One-shot Prisma migration runner (exits after deploy)
+#   api        ï¿½ Express REST API + Socket.IO dashboard (port 3000)
+#   scheduler  ï¿½ Single-instance leader scheduler (promotes delayed tasks)
+#   worker     ï¿½ Stateless execution engine  ï¿½ scale: --scale worker=N
+#   recovery   ï¿½ Stale lock / orphaned task sweeper
 #
 # Usage:
 #   docker compose up -d
