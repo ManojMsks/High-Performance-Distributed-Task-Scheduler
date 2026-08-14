@@ -16,6 +16,10 @@ function info() { echo -e "  ➜ $1"; }
 
 API_URL="http://localhost:3000"
 
+# Ensure cluster services are running (in case a previous run was aborted)
+info "Ensuring cluster services are running..."
+docker compose start worker scheduler recovery
+
 # Step 1: Check health endpoint
 info "Step 1: Checking API health..."
 HEALTH_RES=$(curl -s $API_URL/v1/health)
