@@ -88,7 +88,8 @@ info "Pausing background cluster services so they don't steal test messages..."
 docker compose stop worker scheduler recovery
 
 # Run the compiled .js version since this is the production container!
-if docker compose exec api node dist/scripts/verify-engine.js; then
+# We set LOG_LEVEL=warn to hide the raw JSON debug polling logs that flood the console
+if docker compose exec -e LOG_LEVEL=warn api node dist/scripts/verify-engine.js; then
   pass "Engine verification suite passed!"
 else
   fail "Engine verification suite failed!"
