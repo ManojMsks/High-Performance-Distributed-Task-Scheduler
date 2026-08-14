@@ -264,10 +264,15 @@ async function scenarioD(scheduler: SchedulerService, recovery: RecoveryService)
   const redis = getRedisClient();
 
   // Create a task but don't enqueue it — we'll manually set it to RUNNING
-  const { taskId } = await createTask({
-    type: "verify:noop",
-    payload: { label: "orphan-recovery-test" },
+  const task = await db.task.create({
+    data: {
+      type: "verify:noop",
+      payload: { label: "orphan-recovery-test" },
+      status: TaskStatus.PENDING,
+      priority: TaskPriority.MEDIUM,
+    }
   });
+  const taskId = task.id;
 
   // Simulate a worker crash: set task to RUNNING with a stale lockedAt
   const staleLockTime = new Date(Date.now() - 300_000); // 5 minutes ago
