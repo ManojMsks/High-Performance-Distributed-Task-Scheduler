@@ -83,7 +83,7 @@ export function getBlockingRedisClient(): Redis {
 
   _blockingClient = new Redis({
     ...redisOptions,
-    commandTimeout: 0,
+    commandTimeout: undefined,
     maxRetriesPerRequest: null,
   });
 
@@ -109,10 +109,10 @@ export async function closeRedisClient(): Promise<void> {
   const promises = [];
   if (_client !== null) promises.push(_client.quit());
   if (_blockingClient !== null) promises.push(_blockingClient.quit());
-  
+
   await Promise.all(promises);
   _client = null;
   _blockingClient = null;
-  
+
   logger.info("[Redis] Connections closed gracefully");
 }
