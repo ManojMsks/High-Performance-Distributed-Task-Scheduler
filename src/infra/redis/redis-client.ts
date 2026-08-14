@@ -49,6 +49,7 @@ const redisOptions: RedisOptions = {
 };
 
 let _client: Redis | null = null;
+let _blockingClient: Redis | null = null;
 
 /**
  * Returns the shared ioredis client, creating it on first call.
@@ -74,12 +75,44 @@ export function getRedisClient(): Redis {
 }
 
 /**
+ * Returns the shared blocking ioredis client (for xreadgroup etc.),
+ * creating it on first call.
+ */
+export function getBlockingRedisClient(): Redis {
+  if (_blockingClient !== null) return _blockingClient;
+
+  _blockingClient = new Redis({
+    ...redisOptions,
+    commandTimeout: 0,
+    maxRetriesPerRequest: null,
+  });
+
+  _blockingClient.on("connect", () => logger.info("[Blocking Redis] TCP connection established"));
+  _blockingClient.on("ready", () => logger.info("[Blocking Redis] Client ready"));
+  _blockingClient.on("error", (err: Error) =>
+    logger.error("[Blocking Redis] Error", { error: err.message }),
+  );
+  _blockingClient.on("close", () => logger.warn("[Blocking Redis] Connection closed"));
+  _blockingClient.on("reconnecting", () => logger.warn("[Blocking Redis] Reconnecting…"));
+  _blockingClient.on("end", () =>
+    logger.error("[Blocking Redis] Connection ended permanently"),
+  );
+
+  return _blockingClient;
+}
+
+/**
  * Gracefully closes the Redis connection.
  * Call during process shutdown (SIGTERM / SIGINT handlers).
  */
 export async function closeRedisClient(): Promise<void> {
-  if (_client === null) return;
-  await _client.quit();
+  const promises = [];
+  if (_client !== null) promises.push(_client.quit());
+  if (_blockingClient !== null) promises.push(_blockingClient.quit());
+  
+  await Promise.all(promises);
   _client = null;
-  logger.info("[Redis] Connection closed gracefully");
+  _blockingClient = null;
+  
+  logger.info("[Redis] Connections closed gracefully");
 }

@@ -24,7 +24,7 @@
 import { TaskPriority, TaskStatus, WorkerStatus, LogLevel } from "@prisma/client";
 import os from "os";
 import { getDb } from "../infra/db";
-import { getRedisClient } from "../infra/redis/redis-client";
+import { getRedisClient, getBlockingRedisClient } from "../infra/redis/redis-client";
 import {
   RedisKeys,
   STREAM_CONSUMER_GROUP,
@@ -96,7 +96,8 @@ const PRIORITY_ORDER: Record<string, number> = {
 // -----------------------------------------------------------------------------
 
 export class WorkerService {
-  private readonly redis:    Redis;
+  private readonly redis:         Redis;
+  private readonly blockingRedis: Redis;
   private readonly handlers: Map<string, TaskHandlerFn> = new Map();
 
   private workerId      = "";
@@ -109,6 +110,7 @@ export class WorkerService {
 
   constructor() {
     this.redis          = getRedisClient();
+    this.blockingRedis  = getBlockingRedisClient();
     this.concurrency    = config.WORKER_CONCURRENCY;
     this.blockTimeoutMs = config.WORKER_BLOCK_TIMEOUT_MS;
   }
@@ -129,7 +131,7 @@ export class WorkerService {
   async start(): Promise<void> {
     const db = getDb();
 
-    // Create a Worker record in Postgres — its UUID becomes the workerId
+    // Create a Worker record in Postgres â€” its UUID becomes the workerId
     const worker = await db.worker.create({
       data: {
         hostname:    os.hostname(),
@@ -156,7 +158,7 @@ export class WorkerService {
   }
 
   async stop(): Promise<void> {
-    logger.info("[Worker] Shutting down…", {
+    logger.info("[Worker] Shutting downâ€¦", {
       workerId:    this.workerId,
       activeCount: this.activeCount,
     });
@@ -211,7 +213,7 @@ export class WorkerService {
       } catch (err) {
         const message = (err as Error).message;
         if (!message.includes("BUSYGROUP")) throw err;
-        // BUSYGROUP = group already exists — expected on worker restart
+        // BUSYGROUP = group already exists â€” expected on worker restart
         logger.debug("[Worker] Consumer group already exists", { streamKey });
       }
     }
@@ -262,48 +264,65 @@ export class WorkerService {
     const highKey   = RedisKeys.priorityStream(TaskPriority.HIGH);
     const mediumKey = RedisKeys.priorityStream(TaskPriority.MEDIUM);
     const lowKey    = RedisKeys.priorityStream(TaskPriority.LOW);
-
     // Non-blocking priority sweep
     for (const streamKey of [highKey, mediumKey, lowKey]) {
-      const raw = (await this.redis.xreadgroup(
+      try {
+        const raw = (await this.blockingRedis.xreadgroup(
+          "GROUP", STREAM_CONSUMER_GROUP, this.workerId,
+          "COUNT", maxCount,
+          "STREAMS", streamKey, ">",
+        )) as XReadGroupResponse;
+
+        if (raw !== null && raw.length > 0) {
+          const streamResult = raw[0];
+          if (streamResult !== undefined && streamResult[1].length > 0) {
+            return streamResult[1]
+              .map(([id, fields]) => parseStreamEntry(streamKey, id, fields))
+              .filter((m): m is ConsumedMessage => m !== null);
+          }
+        }
+      } catch (err: any) {
+        if (err.message?.includes('Command timed out')) {
+          continue;
+        }
+        logger.error('[Worker Loop Error]', err);
+        await sleep(1000);
+      }
+    }
+
+    // All queues empty - block across all three and sort result by priority
+    try {
+      const raw = (await this.blockingRedis.xreadgroup(
         "GROUP", STREAM_CONSUMER_GROUP, this.workerId,
         "COUNT", maxCount,
-        "STREAMS", streamKey, ">",
+        "BLOCK", this.blockTimeoutMs,
+        "STREAMS", highKey, mediumKey, lowKey,
+        ">", ">", ">",
       )) as XReadGroupResponse;
 
-      if (raw !== null && raw.length > 0) {
-        const streamResult = raw[0];
-        if (streamResult !== undefined && streamResult[1].length > 0) {
-          return streamResult[1]
-            .map(([id, fields]) => parseStreamEntry(streamKey, id, fields))
-            .filter((m): m is ConsumedMessage => m !== null);
+      if (raw === null) return [];
+
+      const messages: ConsumedMessage[] = [];
+      for (const [streamKey, entries] of raw) {
+        for (const [id, fields] of entries) {
+          const m = parseStreamEntry(streamKey, id, fields);
+          if (m !== null) messages.push(m);
         }
       }
-    }
 
-    // All queues empty — block across all three and sort result by priority
-    const raw = (await this.redis.xreadgroup(
-      "GROUP", STREAM_CONSUMER_GROUP, this.workerId,
-      "COUNT", maxCount,
-      "BLOCK", this.blockTimeoutMs,
-      "STREAMS", highKey, mediumKey, lowKey,
-      ">", ">", ">",
-    )) as XReadGroupResponse;
-
-    if (raw === null) return [];
-
-    const messages: ConsumedMessage[] = [];
-    for (const [streamKey, entries] of raw) {
-      for (const [id, fields] of entries) {
-        const m = parseStreamEntry(streamKey, id, fields);
-        if (m !== null) messages.push(m);
+      // Sort within batch so HIGH messages execute before MEDIUM / LOW
+      return messages.sort(
+        (a, b) => (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2),
+      );
+    } catch (err: any) {
+      if (err.message?.includes('Command timed out')) {
+        // Suppress timeout error on blocking reads and continue loop
+        return [];
       }
+      logger.error('[Worker Loop Error]', err);
+      await sleep(1000); // Backoff delay
+      return [];
     }
-
-    // Sort within batch so HIGH messages execute before MEDIUM / LOW
-    return messages.sort(
-      (a, b) => (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2),
-    );
   }
 
   // -- Message execution ------------------------------------------------------
@@ -326,18 +345,18 @@ export class WorkerService {
     });
 
     if (task === null) {
-      logger.warn("[Worker] Task not found in DB — ACK-ing orphaned entry", { taskId });
+      logger.warn("[Worker] Task not found in DB â€” ACK-ing orphaned entry", { taskId });
       await this.redis.xack(streamKey, STREAM_CONSUMER_GROUP, entryId);
       return;
     }
 
-    // Already in a terminal or cancelled state — nothing to do
+    // Already in a terminal or cancelled state â€” nothing to do
     if (
       task.status === TaskStatus.COMPLETED  ||
       task.status === TaskStatus.CANCELLED  ||
       task.status === TaskStatus.DEAD_LETTER
     ) {
-      logger.info("[Worker] Task already terminal — ACK-ing", { taskId, status: task.status });
+      logger.info("[Worker] Task already terminal â€” ACK-ing", { taskId, status: task.status });
       await this.redis.xack(streamKey, STREAM_CONSUMER_GROUP, entryId);
       return;
     }
@@ -345,7 +364,7 @@ export class WorkerService {
     // 2. Acquire distributed lock (idempotency guard against duplicate delivery)
     const locked = await acquireTaskLock(this.redis, taskId, this.workerId);
     if (!locked) {
-      logger.warn("[Worker] Could not acquire lock — another worker owns it", { taskId });
+      logger.warn("[Worker] Could not acquire lock â€” another worker owns it", { taskId });
       await this.redis.xack(streamKey, STREAM_CONSUMER_GROUP, entryId);
       return;
     }
@@ -374,7 +393,7 @@ export class WorkerService {
       },
     });
 
-    // 4. Lock renewal timer — keeps lock alive during long execution
+    // 4. Lock renewal timer â€” keeps lock alive during long execution
     const renewIntervalMs = Math.floor((LOCK_TTL_SECONDS * 1_000) / 3);
     const renewTimer = setInterval(() => {
       void renewTaskLock(this.redis, taskId, this.workerId);
@@ -439,7 +458,7 @@ export class WorkerService {
       await this.handleFailure(taskId, task.type, msg.priority, task.retryCount, task.maxRetries, error);
     } finally {
       clearInterval(renewTimer);
-      // ACK regardless of outcome — retry/DLQ path handles re-delivery via ZADD
+      // ACK regardless of outcome â€” retry/DLQ path handles re-delivery via ZADD
       await this.redis.xack(streamKey, STREAM_CONSUMER_GROUP, entryId);
       await releaseTaskLock(this.redis, taskId, this.workerId);
     }
@@ -482,7 +501,7 @@ export class WorkerService {
           workerId: this.workerId,
           level:    LogLevel.WARN,
           event:    "task.retrying",
-          message:  `Task failed — retry ${retryCount + 1}/${maxRetries} in ${backoffMs}ms`,
+          message:  `Task failed â€” retry ${retryCount + 1}/${maxRetries} in ${backoffMs}ms`,
           metadata: {
             error:   error.message,
             stack:   error.stack,
@@ -528,7 +547,7 @@ export class WorkerService {
           workerId: this.workerId,
           level:    LogLevel.ERROR,
           event:    "task.dead_lettered",
-          message:  `Task exhausted ${maxRetries} retries — moved to dead-letter queue`,
+          message:  `Task exhausted ${maxRetries} retries â€” moved to dead-letter queue`,
           metadata: { error: error.message, maxRetries },
         },
       });
@@ -563,7 +582,7 @@ function parseStreamEntry(
 
   const { taskId, type, priority } = map;
   if (taskId === undefined || type === undefined || priority === undefined) {
-    logger.warn("[Worker] Malformed stream entry — missing required fields", {
+    logger.warn("[Worker] Malformed stream entry â€” missing required fields", {
       streamKey,
       entryId,
       fields: map,
@@ -583,3 +602,4 @@ function parseStreamEntry(
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
