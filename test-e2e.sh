@@ -55,10 +55,10 @@ done
 # Step 3: Check Metrics
 info "Step 3: Checking Metrics..."
 METRICS_RES=$(curl -s $API_URL/v1/metrics)
-if echo "$METRICS_RES" | grep -q '"queueDepths"'; then
+if echo "$METRICS_RES" | grep -q '"queues"'; then
   pass "Metrics endpoint is responsive"
 else
-  fail "Metrics endpoint failed"
+  fail "Metrics endpoint failed: $METRICS_RES"
 fi
 
 # Step 4: Delayed task test
