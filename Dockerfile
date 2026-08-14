@@ -1,10 +1,13 @@
 # -----------------------------------------------------------------------------
-# Stage 1 — Builder
+# Stage 1 â€” Builder
 # Installs all deps (including dev), generates Prisma client, compiles TypeScript.
 # -----------------------------------------------------------------------------
 FROM node:22-alpine AS builder
 
 WORKDIR /app
+
+# Install OpenSSL and glibc compatibility layer for Alpine FIRST
+RUN apk add --no-cache openssl libc6-compat
 
 # Install deps first (layer-cached unless package*.json changes)
 COPY package*.json ./
@@ -14,13 +17,13 @@ RUN npm ci --quiet
 COPY prisma/ ./prisma/
 RUN npx prisma generate
 
-# Compile TypeScript ? dist/
+# Compile TypeScript -> dist/
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
 
 # -----------------------------------------------------------------------------
-# Stage 2 — Production
+# Stage 2 â€” Production
 # Lean runtime image: only production deps + compiled output.
 # -----------------------------------------------------------------------------
 FROM node:22-alpine AS production
@@ -30,12 +33,16 @@ ENV NODE_ENV=production
 # Prisma uses this to find the database
 ENV DATABASE_URL=""
 
+# Install OpenSSL and glibc compatibility layer for runtime Prisma execution
+RUN apk add --no-cache openssl libc6-compat
+
 # Install only runtime dependencies
 COPY package*.json ./
 RUN npm ci --omit=dev --quiet
 
 # Copy pre-generated Prisma client (avoids needing prisma CLI at runtime)
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # Copy compiled application
 COPY --from=builder /app/dist ./dist

@@ -2,7 +2,8 @@
 // Optimized for high-throughput polling with composite indexes
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -40,7 +41,7 @@ enum WorkerStatus {
 
 // -----------------------------------------------------------------------------
 // Task Model
-// Core entity — every job runs as a Task record.
+// Core entity Â— every job runs as a Task record.
 // -----------------------------------------------------------------------------
 
 model Task {
@@ -64,7 +65,7 @@ model Task {
   executedAt  DateTime?                     // When worker started execution
   completedAt DateTime?                     // When execution finished (success/failure)
 
-  // Distributed locking — worker holds identity + timestamp of lock acquisition
+  // Distributed locking Â— worker holds identity + timestamp of lock acquisition
   lockedById  String?      // UUID of the worker that owns the lock
   lockedAt    DateTime?    // Timestamp when lock was acquired (used for stale-lock detection)
 
