@@ -87,13 +87,12 @@ else
 fi
 
 # Step 5: Run Engine Verification script via API container
-info "Step 5: Running Engine Verification script inside API container..."
+info "Step 5: Running Engine Verification script locally..."
 info "Pausing background cluster services so they don't steal test messages..."
 docker compose stop worker scheduler recovery
 
-# Run the compiled .js version since this is the production container!
-# We set LOG_LEVEL=warn to hide the raw JSON debug polling logs that flood the console
-if docker compose exec -e LOG_LEVEL=warn api node dist/scripts/verify-engine.js; then
+# Run the local .ts version so it includes our latest fixes!
+if npx ts-node src/scripts/verify-engine.ts; then
   pass "Engine verification suite passed!"
 else
   fail "Engine verification suite failed!"
@@ -103,8 +102,8 @@ info "Restarting background cluster services..."
 docker compose start worker scheduler recovery
 
 # Step 6: Test Admin CLI
-info "Step 6: Testing Admin CLI inside API container..."
-if docker compose exec api node dist/cli/admin.js status | grep -q "Cluster Status"; then
+info "Step 6: Testing Admin CLI locally..."
+if npx ts-node src/cli/admin.ts status | grep -q "Cluster Status"; then
   pass "Admin CLI status works"
 else
   fail "Admin CLI status failed"

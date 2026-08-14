@@ -1,4 +1,4 @@
-﻿# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Distributed Task Scheduler � Multi-Container Orchestration
 #
 # Services:
@@ -27,6 +27,8 @@ services:
       POSTGRES_USER:     ${POSTGRES_USER:-scheduler}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scheduler_secret}
       POSTGRES_DB:       ${POSTGRES_DB:-task_scheduler}
+    ports:
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -42,6 +44,8 @@ services:
     image: redis:7.2-alpine
     restart: unless-stopped
     command: redis-server /etc/redis/redis.conf
+    ports:
+      - "6379:6379"
     volumes:
       - ./docker/redis/redis.conf:/etc/redis/redis.conf:ro
       - redisdata:/data
