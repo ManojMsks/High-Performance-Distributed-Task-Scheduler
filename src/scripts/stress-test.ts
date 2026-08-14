@@ -33,7 +33,7 @@ async function main() {
       
       promises.push(createTask({
         type: "email:send",
-        payload: { stress: true, index: i + j, to: "stress@example.com" },
+        payload: { stress: true, index: i + j, delayMs: 0 },
         priority: "HIGH"
       }));
     }
