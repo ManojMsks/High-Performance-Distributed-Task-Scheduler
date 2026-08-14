@@ -1,4 +1,4 @@
-# Distributed Task Scheduler — Interview Deep-Dive Cheatsheet
+# Distributed Task Scheduler â€” Interview Deep-Dive Cheatsheet
 
 > A complete technical reference for communicating the design of this system in senior/staff SDE interviews.
 
@@ -24,22 +24,22 @@
 
 ```
 +-------------+   POST /v1/tasks   +------------------------------------------+
-¦  REST Client¦------------------? ¦            Producer                      ¦
-+-------------+                    ¦  validate ? Postgres(PENDING) ? route     ¦
+Â¦  REST ClientÂ¦------------------? Â¦            Producer                      Â¦
++-------------+                    Â¦  validate ? Postgres(PENDING) ? route     Â¦
                                    +-------------------------------------------+
-                                  immediate   ¦                  ¦ scheduledAt > now
-                                   XADD ?    ¦                  ? ZADD (score=ms)
+                                  immediate   Â¦                  Â¦ scheduledAt > now
+                                   XADD ?    Â¦                  ? ZADD (score=ms)
                               +----------------+     +-------------------------+
-                              ¦  Priority       ¦     ¦  Delayed ZSET           ¦
-                              ¦  Streams (3)    ¦?----¦  scheduler:delayed:zset ¦
-                              ¦  HIGH/MED/LOW   ¦     ¦  (SchedulerService)     ¦
+                              Â¦  Priority       Â¦     Â¦  Delayed ZSET           Â¦
+                              Â¦  Streams (3)    Â¦?----Â¦  scheduler:delayed:zset Â¦
+                              Â¦  HIGH/MED/LOW   Â¦     Â¦  (SchedulerService)     Â¦
                               +-----------------+     +-------------------------+
-                                      ¦ XREADGROUP (consumer group)
+                                      Â¦ XREADGROUP (consumer group)
                               +-------?--------------------------------------+
-                              ¦           WorkerService (N replicas)          ¦
-                              ¦  lock ? RUNNING ? execute handler ? ACK/NACK ¦
+                              Â¦           WorkerService (N replicas)          Â¦
+                              Â¦  lock ? RUNNING ? execute handler ? ACK/NACK Â¦
                               +----------------------------------------------+
-                               success¦                  failure¦
+                               successÂ¦                  failureÂ¦
                                       ?                        ?
                              Postgres(COMPLETED)        retry ZADD / DLQ XADD
 ```
@@ -52,7 +52,7 @@
 
 ### The Problem
 
-In a distributed system with multiple scheduler instances, split-brain occurs when two nodes simultaneously believe they are the leader and both promote tasks — causing double-execution.
+In a distributed system with multiple scheduler instances, split-brain occurs when two nodes simultaneously believe they are the leader and both promote tasks â€” causing double-execution.
 
 ### Our Solution: Atomic Redis SET NX PX
 
@@ -65,10 +65,10 @@ SET scheduler:lock:scheduler-leader <schedulerId> NX PX <ttl_ms>
 
 | Property | How it's guaranteed |
 |---|---|
-| **Mutual exclusion** | `SET NX` is atomic — only one writer succeeds |
+| **Mutual exclusion** | `SET NX` is atomic â€” only one writer succeeds |
 | **Automatic expiry** | `PX <ttl>` means the lock self-releases if the holder crashes |
 | **Fencing against zombie leaders** | Compare-and-delete Lua script checks identity before DEL |
-| **Renewal** | Leader renews at TTL/3 — 3× safety margin before expiry |
+| **Renewal** | Leader renews at TTL/3 â€” 3Ã— safety margin before expiry |
 
 **Lock renewal Lua script:**
 ```lua
@@ -87,7 +87,7 @@ end
 
 ### Redlock for production clusters
 
-In a Redis Cluster (multiple masters), `SET NX` is insufficient (network partition can create two primaries). The solution is **Redlock** (write majority of N masters atomically). For this project, single-node Redis with AOF persistence is the chosen tradeoff — acceptable for most production deployments.
+In a Redis Cluster (multiple masters), `SET NX` is insufficient (network partition can create two primaries). The solution is **Redlock** (write majority of N masters atomically). For this project, single-node Redis with AOF persistence is the chosen tradeoff â€” acceptable for most production deployments.
 
 ---
 
@@ -118,7 +118,7 @@ XREADGROUP GROUP workers worker-1 COUNT 10 STREAMS scheduler:stream:high >
 - If `worker-1` crashes before `XACK`, the message stays in the PEL with an idle timer.
 - `XCLAIM` lets the recovery service take ownership after the idle threshold.
 
-This provides **at-least-once delivery with replay capability** — impossible with Lists or Pub/Sub.
+This provides **at-least-once delivery with replay capability** â€” impossible with Lists or Pub/Sub.
 
 ---
 
@@ -126,12 +126,12 @@ This provides **at-least-once delivery with replay capability** — impossible wit
 
 ### The Two-Layer Guard
 
-**Layer 1 — Stream consumer groups (delivery guarantee):**
+**Layer 1 â€” Stream consumer groups (delivery guarantee):**
 - `XREADGROUP` delivers each message to exactly one consumer per group.
-- Messages stay in PEL until `XACK` — never silently dropped.
+- Messages stay in PEL until `XACK` â€” never silently dropped.
 - Crashed workers ? RecoveryService reclaims via `XCLAIM` ? re-executes.
 
-**Layer 2 — Per-task distributed lock (execution deduplication):**
+**Layer 2 â€” Per-task distributed lock (execution deduplication):**
 ```lua
 -- acquireTaskLock: only the first winner executes
 SET scheduler:lock:task:{taskId} {workerId} NX PX {ttl_ms}
@@ -149,7 +149,7 @@ SET scheduler:lock:task:{taskId} {workerId} NX PX {ttl_ms}
 
 **Result:** Even if a message is delivered twice (e.g., after recovery), only one execution completes because the second worker fails to acquire the lock (or finds status already COMPLETED).
 
-**This gives us:** At-least-once delivery (Step 1) + idempotent execution (Steps 2–3).
+**This gives us:** At-least-once delivery (Step 1) + idempotent execution (Steps 2â€“3).
 
 ### Edge case: lock expires during execution
 
@@ -199,7 +199,7 @@ One sweeper cannot fix both. We need two complementary, idempotent jobs.
 
 **Idempotency:** If Job 1 runs twice for the same task (e.g., two recovery instances during a restart), the second update finds the task already in `RETRYING` and is a no-op. Job 2 XCLAIM fails gracefully if the entry was already claimed (race condition, benign).
 
-### Heartbeat-gated recovery — false positive prevention
+### Heartbeat-gated recovery â€” false positive prevention
 
 ```
 heartbeat key exists?
@@ -207,13 +207,13 @@ heartbeat key exists?
   NO  ? worker is DEAD ? recover the task
 ```
 
-Without heartbeat gating, a slow worker executing a valid task could have its lock "recovered" by the sweeper, causing duplicate execution. The heartbeat TTL is set 3× larger than the heartbeat emission interval to prevent false negatives under transient network hiccups.
+Without heartbeat gating, a slow worker executing a valid task could have its lock "recovered" by the sweeper, causing duplicate execution. The heartbeat TTL is set 3Ã— larger than the heartbeat emission interval to prevent false negatives under transient network hiccups.
 
 ---
 
 ## 6. "How does the system scale horizontally?"
 
-### Workers (stateless — scale freely)
+### Workers (stateless â€” scale freely)
 
 ```bash
 docker compose up -d --scale worker=10
@@ -221,18 +221,18 @@ docker compose up -d --scale worker=10
 
 - Workers are **completely stateless**. Each creates a consumer group member under the shared `workers` group name.
 - Redis distributes stream messages across all consumer group members automatically.
-- No central coordination needed — workers independently call `XREADGROUP`.
+- No central coordination needed â€” workers independently call `XREADGROUP`.
 
-### Scheduler (leader-elected — only one active)
+### Scheduler (leader-elected â€” only one active)
 
 - Multiple scheduler replicas can run (handled by docker deploy.replicas).
 - Only the leader (lock holder) promotes delayed tasks.
 - Standby instances poll for the lock and take over within one TTL window (~30s).
 
-### API (stateless — load-balance freely)
+### API (stateless â€” load-balance freely)
 
 - Multiple API replicas behind a load balancer (nginx, AWS ALB).
-- All state is in Postgres/Redis — no session affinity required.
+- All state is in Postgres/Redis â€” no session affinity required.
 - Socket.IO requires sticky sessions for WebSocket connections (or use Redis adapter: `socket.io-redis`).
 
 ### Database (Postgres vertical + read replicas)
@@ -277,15 +277,15 @@ await XREADGROUP(BLOCK 5000ms, STREAMS high medium low, "> > >")
 |---|---|---|
 | **Durability** | WAL + ACID transactions | AOF + RDB snapshots |
 | **Query flexibility** | Complex joins, GROUP BY | None |
-| **Throughput (reads)** | ~10k–50k QPS | ~500k–1M QPS |
+| **Throughput (reads)** | ~10kâ€“50k QPS | ~500kâ€“1M QPS |
 | **Task metadata** | Full history, logs, retries | Hot path only |
-| **Distributed locks** | Pessimistic (advisory locks) | NX PX (µs latency) |
+| **Distributed locks** | Pessimistic (advisory locks) | NX PX (Âµs latency) |
 | **Fan-out / pub-sub** | LISTEN/NOTIFY (limited) | Native |
 | **Recovery queries** | `WHERE status=RUNNING AND lockedAt < ?` | Cannot express |
 
 **Using only Redis:** No ACID guarantees; complex queries impossible; recovery is hard to audit; no relational integrity.
 
-**Using only Postgres:** No efficient blocking queue; lock acquisition requires table-level locking; ~100× slower for queue operations; no TTL semantics on rows.
+**Using only Postgres:** No efficient blocking queue; lock acquisition requires table-level locking; ~100Ã— slower for queue operations; no TTL semantics on rows.
 
 ---
 
@@ -299,7 +299,7 @@ await XREADGROUP(BLOCK 5000ms, STREAMS high medium low, "> > >")
 | **Redis restart** | AOF replay | Streams/ZSET restored; task state in Postgres is authoritative |
 | **Postgres restart** | Connection pool reconnect | Workers pause, retry; no data loss (WAL) |
 | **Network partition (worker ? Redis)** | Worker can't renew lock ? lock expires | RecoveryService detects expired heartbeat ? re-queues |
-| **Double delivery (stream replay)** | — | Per-task lock + status check prevents double execution |
+| **Double delivery (stream replay)** | â€” | Per-task lock + status check prevents double execution |
 | **Poisonous message (always fails)** | Max retries exhausted | Dead-letter queue (XADD + DEAD_LETTER status) |
 | **Full Redis memory** | MAXLEN truncates oldest stream entries | Monitor with /v1/metrics; alert on DLQ growth |
 
@@ -342,7 +342,7 @@ Route to Datadog / ELK / CloudWatch for alerting.
 | Signal | Threshold | Action |
 |---|---|---|
 | DLQ depth | > 0 | Page on-call |
-| `RUNNING` tasks with age > 5× avg | > 5 | Investigate stale lock |
+| `RUNNING` tasks with age > 5Ã— avg | > 5 | Investigate stale lock |
 | Worker count | 0 | Critical alert |
 | HIGH queue depth | > 1000 | Scale workers |
 | Scheduler lock not renewed | > TTL | Restart scheduler |
@@ -355,9 +355,9 @@ Route to Datadog / ELK / CloudWatch for alerting.
 |---|---|---|
 | Lock TTL | 30s | Max expected handler duration |
 | Heartbeat interval | 15s | Emitted at TTL/2 for safety |
-| Heartbeat TTL | 45s | 3× interval — survives 2 missed heartbeats |
+| Heartbeat TTL | 45s | 3Ã— interval â€” survives 2 missed heartbeats |
 | Scheduler poll | 1s | Sub-second promotion accuracy |
-| Stale lock threshold | 90s | 3× lock TTL — well past expiry |
+| Stale lock threshold | 90s | 3Ã— lock TTL â€” well past expiry |
 | Recovery poll | 30s | Balance between latency and DB load |
 | Retry backoff | `min(2^n * 1s, 1h)` | Exponential with 1-hour ceiling |
 | Max retries | 3 | Configurable per task |
@@ -367,4 +367,4 @@ Route to Datadog / ELK / CloudWatch for alerting.
 
 ---
 
-*Built with: Node.js 22 · TypeScript 5 · Prisma 5 · Redis 7.2 Streams · PostgreSQL 16 · Express · Socket.IO · Docker*
+*Built with: Node.js 22 Â· TypeScript 5 Â· Prisma 5 Â· Redis 7.2 Streams Â· PostgreSQL 16 Â· Express Â· Socket.IO Â· Docker*

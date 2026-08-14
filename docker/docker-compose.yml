@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# Distributed Task Scheduler — Docker Compose
+# Distributed Task Scheduler â€” Docker Compose
 # Services: PostgreSQL 16, Redis 7.2
 # -----------------------------------------------------------------------------
 
@@ -50,7 +50,7 @@ services:
       - scheduler_net
 
   # ---------------------------------------------------------------------------
-  # Redis 7.2 — AOF persistence, explicit memory ceiling
+  # Redis 7.2 â€” AOF persistence, explicit memory ceiling
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7.2-alpine

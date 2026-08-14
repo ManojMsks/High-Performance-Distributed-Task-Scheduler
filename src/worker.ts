@@ -1,35 +1,30 @@
 /**
- * src/worker.ts � Worker process entry point.
+ * src/worker.ts — Worker process entry point.
  * Run with: npm run worker
  *
  * Register your task handlers here before calling start().
  */
 import "dotenv/config";
-import { WorkerService }    from "./core/worker";
-import { logger }           from "./infra/logger";
-import { disconnectDb }     from "./infra/db";
-import { closeRedisClient } from "./infra/redis/redis-client";
+import { WorkerService }     from "./core/worker";
+import { registerAllHandlers } from "./handlers";
+import { logger }            from "./infra/logger";
+import { disconnectDb }      from "./infra/db";
+import { closeRedisClient }  from "./infra/redis/redis-client";
 
 const worker = new WorkerService();
 
 // -- Register task handlers ---------------------------------------------------
-
-worker.register("email:send", async (payload, ctx) => {
-  logger.info("[Handler] email:send", { taskId: ctx.taskId, to: payload["to"] });
-  // TODO: integrate email provider (SendGrid, SES, etc.)
-  await new Promise<void>((resolve) => setTimeout(resolve, 100));
-});
-
-worker.register("image:resize", async (payload, ctx) => {
-  logger.info("[Handler] image:resize", { taskId: ctx.taskId, url: payload["url"] });
-  // TODO: integrate image processing (sharp, ffmpeg, etc.)
-  await new Promise<void>((resolve) => setTimeout(resolve, 200));
-});
+// Wired to the real handler implementations in src/handlers/index.ts
+// (email:send, image:resize, report:generate). Previously this file defined
+// its own bare-bones inline stubs and never registered "report:generate" at
+// all â€” any task of that type would fail with "No handler registered" and
+// go straight to retry/DLQ. registerAllHandlers() keeps the two in sync.
+registerAllHandlers(worker);
 
 // -- Lifecycle ----------------------------------------------------------------
 
 async function shutdown(signal: string): Promise<void> {
-  logger.info(`[Worker Process] ${signal} � shutting down`);
+  logger.info(`[Worker Process] ${signal} — shutting down`);
   await worker.stop();
   await disconnectDb();
   await closeRedisClient();

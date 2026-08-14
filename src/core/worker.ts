@@ -29,7 +29,6 @@ import {
   RedisKeys,
   STREAM_CONSUMER_GROUP,
   LOCK_TTL_SECONDS,
-  WORKER_HEARTBEAT_TTL_SECONDS,
   acquireTaskLock,
   releaseTaskLock,
   renewTaskLock,
@@ -196,7 +195,12 @@ export class WorkerService {
 
   /**
    * Ensures the consumer group exists on all three priority streams.
-   * '$' start ID = only consume messages added after group creation (fresh start).
+   * "0" start ID = new groups start from the beginning of the stream, so if
+   * any tasks were ever XADDed before the very first worker in this group's
+   * history came up, they'll still be delivered instead of silently skipped.
+   * (Only matters on true first-ever creation — this call is a no-op via
+   * BUSYGROUP on every subsequent worker start/restart, since the group
+   * persists on the stream once created.)
    * MKSTREAM    = auto-create the stream if it doesn't yet exist.
    */
   private async initConsumerGroups(): Promise<void> {
@@ -223,10 +227,10 @@ export class WorkerService {
 
   private startHeartbeat(): void {
     // Emit once immediately so the key exists before the first lock check
-    void sendWorkerHeartbeat(this.redis, this.workerId, WORKER_HEARTBEAT_TTL_SECONDS);
+    void sendWorkerHeartbeat(this.redis, this.workerId, config.WORKER_HEARTBEAT_TTL_SECONDS);
 
     this.heartbeatTimer = setInterval(() => {
-      void sendWorkerHeartbeat(this.redis, this.workerId, WORKER_HEARTBEAT_TTL_SECONDS);
+      void sendWorkerHeartbeat(this.redis, this.workerId, config.WORKER_HEARTBEAT_TTL_SECONDS);
     }, config.WORKER_HEARTBEAT_INTERVAL_MS);
   }
 

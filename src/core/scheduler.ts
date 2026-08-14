@@ -7,7 +7,7 @@
  * scheduledAt score <= Date.now() into the appropriate priority stream.
  *
  * Distributed leader lock (scheduler:lock:scheduler-leader) ensures only one
- * scheduler instance promotes tasks at a time — others stand by and take over
+ * scheduler instance promotes tasks at a time â€” others stand by and take over
  * automatically if the leader crashes (TTL expiry).
  *
  * Architecture:
@@ -158,7 +158,7 @@ export class SchedulerService {
    * Loads task metadata from Postgres, enqueues each to its priority stream,
    * and updates the status to QUEUED.
    *
-   * Uses Promise.allSettled so a single failure doesn't abort the whole batch —
+   * Uses Promise.allSettled so a single failure doesn't abort the whole batch â€”
    * failed tasks are re-inserted into the ZSET with a short delay.
    */
   private async promoteTasks(taskIds: string[]): Promise<void> {
@@ -192,7 +192,7 @@ export class SchedulerService {
             Date.now() + 5_000,
             task.id,
           );
-          logger.error("[Scheduler] Promotion failed — re-queued", {
+          logger.error("[Scheduler] Promotion failed â€” re-queued", {
             taskId: task.id,
             error:  (err as Error).message,
           });
@@ -232,7 +232,7 @@ export class SchedulerService {
     );
 
     if (result !== 1) {
-      logger.warn("[Scheduler] Lost leader lock — another instance took over");
+      logger.warn("[Scheduler] Lost leader lock â€” another instance took over");
       this.isLeader = false;
       if (this.renewTimer !== null) {
         clearInterval(this.renewTimer);
@@ -253,7 +253,7 @@ export class SchedulerService {
   }
 
   /**
-   * Publicly exposed promotion trigger — bypasses leader-lock for test harnesses.
+   * Publicly exposed promotion trigger â€” bypasses leader-lock for test harnesses.
    * Useful for the E2E verification suite to force-promote delayed tasks without
    * waiting for the full poll interval.
    */

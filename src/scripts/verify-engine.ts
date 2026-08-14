@@ -5,18 +5,18 @@
  *
  * Bootstraps the full scheduler engine in-process and runs four scenarios:
  *
- *   A — Immediate multi-priority execution
+ *   A â€” Immediate multi-priority execution
  *       Creates HIGH / MEDIUM / LOW tasks and verifies all complete.
  *
- *   B — Delayed task scheduling
+ *   B â€” Delayed task scheduling
  *       Schedules a task +4 s in the future, waits for scheduler promotion
  *       and worker execution.
  *
- *   C — Retry & Dead-Letter Queue
+ *   C â€” Retry & Dead-Letter Queue
  *       Registers a handler that always throws.  Verifies exponential-backoff
  *       retry cycles and eventual DEAD_LETTER routing.
  *
- *   D — Stale Lock Recovery
+ *   D â€” Stale Lock Recovery
  *       Inserts a task directly in RUNNING state with a stale lockedAt,
  *       triggers one recovery sweep, and verifies the task is re-queued
  *       then executed to COMPLETED.
@@ -103,7 +103,7 @@ interface ScenarioResult {
 // -----------------------------------------------------------------------------
 
 async function scenarioA(): Promise<void> {
-  section("Scenario A — Immediate Multi-Priority Execution");
+  section("Scenario A â€” Immediate Multi-Priority Execution");
 
   const db   = getDb();
   const tasks = await Promise.all([
@@ -116,7 +116,7 @@ async function scenarioA(): Promise<void> {
   ]);
 
   const taskIds = tasks.map((t) => t.taskId);
-  info(`Created ${taskIds.length} tasks (2×HIGH, 2×MEDIUM, 2×LOW)`);
+  info(`Created ${taskIds.length} tasks (2Ã—HIGH, 2Ã—MEDIUM, 2Ã—LOW)`);
 
   // Verify all enqueued immediately
   for (const t of tasks) {
@@ -144,7 +144,7 @@ async function scenarioA(): Promise<void> {
 // -----------------------------------------------------------------------------
 
 async function scenarioB(scheduler: SchedulerService): Promise<void> {
-  section("Scenario B — Delayed Task Scheduling");
+  section("Scenario B â€” Delayed Task Scheduling");
 
   const db         = getDb();
   const redis      = getRedisClient();
@@ -170,7 +170,7 @@ async function scenarioB(scheduler: SchedulerService): Promise<void> {
   pass("Initial status is PENDING");
 
   // Wait for delay to elapse, then trigger scheduler promotion
-  info("Waiting for scheduled time…");
+  info("Waiting for scheduled timeâ€¦");
   await sleep(delayMs + 200);
   await scheduler.promoteReadyTasks();
   info("Promotion triggered");
@@ -195,7 +195,7 @@ async function scenarioB(scheduler: SchedulerService): Promise<void> {
 // -----------------------------------------------------------------------------
 
 async function scenarioC(scheduler: SchedulerService): Promise<void> {
-  section("Scenario C — Retry & Dead-Letter Queue");
+  section("Scenario C â€” Retry & Dead-Letter Queue");
 
   const db = getDb();
 
@@ -258,12 +258,12 @@ async function scenarioC(scheduler: SchedulerService): Promise<void> {
 // -----------------------------------------------------------------------------
 
 async function scenarioD(scheduler: SchedulerService, recovery: RecoveryService): Promise<void> {
-  section("Scenario D — Stale Lock & Orphaned Task Recovery");
+  section("Scenario D â€” Stale Lock & Orphaned Task Recovery");
 
   const db    = getDb();
   const redis = getRedisClient();
 
-  // Create a task but don't enqueue it — we'll manually set it to RUNNING
+  // Create a task but don't enqueue it â€” we'll manually set it to RUNNING
   const { taskId } = await createTask({
     type:    "verify:noop",
     payload: { label: "orphan-recovery-test" },
@@ -283,7 +283,7 @@ async function scenarioD(scheduler: SchedulerService, recovery: RecoveryService)
     },
   });
 
-  // Do NOT set a heartbeat key for fakeWorkerId — it's genuinely "dead"
+  // Do NOT set a heartbeat key for fakeWorkerId â€” it's genuinely "dead"
   const heartbeat = await redis.get(RedisKeys.workerHeartbeat(fakeWorkerId));
   assert(heartbeat === null, "Fake worker must have no heartbeat");
   info(`Task ${taskId} artificially set to RUNNING with stale lock (${staleLockTime.toISOString()})`);
@@ -384,7 +384,7 @@ async function teardown(
 
 async function main(): Promise<void> {
   console.log(`\n${C.bold}${C.cyan}${"-".repeat(60)}${C.reset}`);
-  console.log(`${C.bold}${C.cyan}  Distributed Task Scheduler — E2E Verification Suite${C.reset}`);
+  console.log(`${C.bold}${C.cyan}  Distributed Task Scheduler â€” E2E Verification Suite${C.reset}`);
   console.log(`${C.bold}${C.cyan}${"-".repeat(60)}${C.reset}\n`);
 
   const { workers, scheduler, recovery } = await startServices();
@@ -431,7 +431,7 @@ async function main(): Promise<void> {
     console.log(`${C.bold}${C.green}  All scenarios passed! Engine is production-ready.${C.reset}\n`);
     process.exit(0);
   } else {
-    console.log(`${C.bold}${C.red}  Some scenarios failed — see output above.${C.reset}\n`);
+    console.log(`${C.bold}${C.red}  Some scenarios failed â€” see output above.${C.reset}\n`);
     process.exit(1);
   }
 }

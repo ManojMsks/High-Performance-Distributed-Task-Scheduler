@@ -228,9 +228,13 @@ async function cmdStatus(): Promise<void> {
 
   for (const key of streamKeys) {
     try {
-      const pending = await redis.xpending(key, STREAM_CONSUMER_GROUP, "-", "+", 1) as unknown[];
-      const label   = key.split(":").pop() ?? key;
-      const count   = Array.isArray(pending) ? pending.length : 0;
+      // Summary form (no start/end/count range) returns [totalPending, minId, maxId, perConsumer].
+      // The previous version used the range form with COUNT 1, which caps the returned
+      // array at 1 entry regardless of how many are actually pending — so it could only
+      // ever report "0" or "1", never the real backlog size.
+      const summary = await redis.xpending(key, STREAM_CONSUMER_GROUP) as [number, string | null, string | null, unknown];
+      const label = key.split(":").pop() ?? key;
+      const count = summary[0];
       console.log(fmt.label(`    ${label}`, count > 0 ? fmt.warn(String(count)) : String(count)));
     } catch {
       // stream may not exist yet

@@ -12,7 +12,7 @@ import { closeRedisClient } from "./infra/redis/redis-client";
 const recovery = new RecoveryService();
 
 async function shutdown(signal: string): Promise<void> {
-  logger.info(`[Recovery Service] ${signal} — shutting down`);
+  logger.info(`[Recovery Service] ${signal} â€” shutting down`);
   await recovery.stop();
   await disconnectDb();
   await closeRedisClient();

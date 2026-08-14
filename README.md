@@ -6,33 +6,33 @@ A production-grade, fault-tolerant distributed task scheduler built with **Node.
 
 ```
 +-------------------------------------------------------------+
-¦                        API Server                           ¦
-¦                    (Express + TypeScript)                   ¦
+Â¦                        API Server                           Â¦
+Â¦                    (Express + TypeScript)                   Â¦
 +-------------------------------------------------------------+
-             ¦ enqueue                   ¦ status/results
+             Â¦ enqueue                   Â¦ status/results
              ?                           ?
 +---------------------+       +-----------------------------+
-¦    Scheduler        ¦       ¦      PostgreSQL 16           ¦
-¦  (Delayed ZSET      ¦------?¦  Tasks / Workers / Logs     ¦
-¦   ? Stream Promo)   ¦       +-----------------------------+
+Â¦    Scheduler        Â¦       Â¦      PostgreSQL 16           Â¦
+Â¦  (Delayed ZSET      Â¦------?Â¦  Tasks / Workers / Logs     Â¦
+Â¦   ? Stream Promo)   Â¦       +-----------------------------+
 +---------------------+
-         ¦ XADD
+         Â¦ XADD
          ?
 +-------------------------------------------------------------+
-¦                       Redis 7.2                             ¦
-¦  scheduler:delayed:zset      (Sorted Set — delayed tasks)   ¦
-¦  scheduler:stream:high       (Stream — priority queue)      ¦
-¦  scheduler:stream:medium     (Stream — priority queue)      ¦
-¦  scheduler:stream:low        (Stream — priority queue)      ¦
-¦  scheduler:lock:task:{id}    (String — distributed lock)    ¦
-¦  scheduler:worker:heartbeat:{id} (String — TTL liveness)   ¦
+Â¦                       Redis 7.2                             Â¦
+Â¦  scheduler:delayed:zset      (Sorted Set â€” delayed tasks)   Â¦
+Â¦  scheduler:stream:high       (Stream â€” priority queue)      Â¦
+Â¦  scheduler:stream:medium     (Stream â€” priority queue)      Â¦
+Â¦  scheduler:stream:low        (Stream â€” priority queue)      Â¦
+Â¦  scheduler:lock:task:{id}    (String â€” distributed lock)    Â¦
+Â¦  scheduler:worker:heartbeat:{id} (String â€” TTL liveness)   Â¦
 +-------------------------------------------------------------+
-         ¦ XREADGROUP
+         Â¦ XREADGROUP
          ?
 +-------------------------------------------------------------+
-¦                      Worker Pool                            ¦
-¦   Worker 1   Worker 2   Worker 3   …   Worker N             ¦
-¦   (concurrency per worker configurable via env)             ¦
+Â¦                      Worker Pool                            Â¦
+Â¦   Worker 1   Worker 2   Worker 3   â€¦   Worker N             Â¦
+Â¦   (concurrency per worker configurable via env)             Â¦
 +-------------------------------------------------------------+
 ```
 
@@ -47,33 +47,33 @@ A production-grade, fault-tolerant distributed task scheduler built with **Node.
 | Persistence | PostgreSQL (source of truth) + Redis (hot path) | ACID + throughput |
 | Schema | Prisma ORM | Type-safe, migrations, composite indexes |
 
-## Phase 1 — Repository Setup, Schema & Redis Key Design
+## Phase 1 â€” Repository Setup, Schema & Redis Key Design
 
 ### File Tree
 
 ```
 .
 +-- docker/
-¦   +-- docker-compose.yml         # Postgres 16 + Redis 7.2 with healthchecks
-¦   +-- redis/
-¦   ¦   +-- redis.conf             # AOF persistence, maxmemory 512MB, slow-log
-¦   +-- postgres/
-¦       +-- init/
-¦           +-- 00-extensions.sql  # pg_stat_statements, uuid-ossp
+Â¦   +-- docker-compose.yml         # Postgres 16 + Redis 7.2 with healthchecks
+Â¦   +-- redis/
+Â¦   Â¦   +-- redis.conf             # AOF persistence, maxmemory 512MB, slow-log
+Â¦   +-- postgres/
+Â¦       +-- init/
+Â¦           +-- 00-extensions.sql  # pg_stat_statements, uuid-ossp
 +-- prisma/
-¦   +-- schema.prisma              # Task, Worker, TaskLog + composite indexes
+Â¦   +-- schema.prisma              # Task, Worker, TaskLog + composite indexes
 +-- src/
-¦   +-- config/
-¦   ¦   +-- index.ts               # Zod-validated env config (fail-fast)
-¦   +-- infra/
-¦   ¦   +-- logger.ts              # Winston (pretty dev / JSON prod + rotating files)
-¦   ¦   +-- db.ts                  # Prisma singleton
-¦   ¦   +-- redis/
-¦   ¦       +-- redis-client.ts    # ioredis singleton + retry strategy + events
-¦   ¦       +-- redis-keys.ts      # Key namespace + atomic lock/heartbeat ops
-¦   +-- types/
-¦   ¦   +-- index.ts               # Branded IDs, DTOs, Result<T,E>
-¦   +-- index.ts                   # API server bootstrap
+Â¦   +-- config/
+Â¦   Â¦   +-- index.ts               # Zod-validated env config (fail-fast)
+Â¦   +-- infra/
+Â¦   Â¦   +-- logger.ts              # Winston (pretty dev / JSON prod + rotating files)
+Â¦   Â¦   +-- db.ts                  # Prisma singleton
+Â¦   Â¦   +-- redis/
+Â¦   Â¦       +-- redis-client.ts    # ioredis singleton + retry strategy + events
+Â¦   Â¦       +-- redis-keys.ts      # Key namespace + atomic lock/heartbeat ops
+Â¦   +-- types/
+Â¦   Â¦   +-- index.ts               # Branded IDs, DTOs, Result<T,E>
+Â¦   +-- index.ts                   # API server bootstrap
 +-- .env.example
 +-- .gitignore
 +-- package.json
@@ -98,9 +98,23 @@ docker compose -f docker/docker-compose.yml up -d
 npm run prisma:generate
 npm run prisma:migrate
 
-# 5. Start the API server
+# 5. Start the API server (dashboard + REST API)
 npm run dev
+
+# 6. In separate terminals, start the processes that actually do the work.
+#    The API server on its own only accepts tasks Ã¢â‚¬â€ nothing executes them
+#    until at least a worker (and, for delayed/retry tasks, a scheduler)
+#    is running:
+npm run worker      # executes tasks pulled from the priority streams
+npm run scheduler    # promotes delayed/retrying tasks into the streams
+npm run recovery      # reclaims tasks orphaned by a crashed worker
 ```
+
+All five processes (API, worker, scheduler, recovery, plus Postgres/Redis)
+need to be running for the system to actually process anything end to end.
+`worker` can be run multiple times in parallel to scale out; `scheduler` and
+`recovery` should normally run as a single instance each (the scheduler
+uses a distributed leader lock so extra replicas just stand by).
 
 ## Environment Variables
 

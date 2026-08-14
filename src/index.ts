@@ -5,7 +5,6 @@
  *       npm run start (production)
  */
 import "dotenv/config";
-import path                                        from "path";
 import { createServer }                            from "http";
 import { createApp }                               from "./api/server";
 import { attachWebSocket }                         from "./api/websocket";
@@ -22,15 +21,6 @@ async function bootstrap(): Promise<void> {
   const app        = createApp();
   const httpServer = createServer(app);
 
-  // Serve the SPA dashboard
-  app.use("/", (req, res, next) => {
-    if (req.method === "GET" && req.path === "/") {
-      res.sendFile(path.join(process.cwd(), "public", "index.html"));
-    } else {
-      next();
-    }
-  });
-
   // Attach real-time Socket.IO gateway
   attachWebSocket(httpServer);
 
@@ -42,7 +32,7 @@ async function bootstrap(): Promise<void> {
 }
 
 async function shutdown(signal: string): Promise<void> {
-  logger.info(`[Server] ${signal} received — shutting down gracefully`);
+  logger.info(`[Server] ${signal} received â€” shutting down gracefully`);
   await disconnectDb();
   await closeRedisClient();
   process.exit(0);

@@ -7,6 +7,7 @@
  */
 
 import "express-async-errors";
+import path from "path";
 import express, {
   type Request,
   type Response,
@@ -40,6 +41,13 @@ export function createApp(): express.Application {
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: false }));
 
+  // -- Static dashboard --------------------------------------------------------
+  // MUST be registered before the /v1 router and the 404 catch-all below,
+  // otherwise GET / (and any other unmatched path) hits the catch-all first
+  // and the SPA never gets served. express.static also handles GET / -> index.html
+  // automatically, plus JS/CSS/asset requests.
+  app.use(express.static(path.join(process.cwd(), "public")));
+
   // -- Routes ----------------------------------------------------------------
   app.use("/v1", taskRouter);
 
@@ -49,7 +57,7 @@ export function createApp(): express.Application {
   });
 
   // -- Global error handler --------------------------------------------------
-  // Express identifies error handlers by 4-parameter signature — _next must be declared.
+  // Express identifies error handlers by 4-parameter signature â€” _next must be declared.
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof ZodError) {
       sendError(res, 400, {

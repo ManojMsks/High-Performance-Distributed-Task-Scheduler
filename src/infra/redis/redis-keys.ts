@@ -33,11 +33,15 @@ const NS = "scheduler" as const;
 export const LOCK_TTL_SECONDS = 60 as const;
 
 /**
- * TTL for a worker heartbeat key, in seconds.
+ * Fallback TTL for a worker heartbeat key, in seconds, used only when a
+ * caller doesn't pass an explicit ttlSec. The live value actually used by
+ * WorkerService comes from config.WORKER_HEARTBEAT_TTL_SECONDS (env-driven)
+ * â€” see src/core/worker.ts. Kept here only as a safe default for direct
+ * callers of sendWorkerHeartbeat().
  * If a worker misses this window without renewal the key expires and
  * the recovery scheduler treats its in-flight tasks as stale.
  */
-export const WORKER_HEARTBEAT_TTL_SECONDS = 30 as const;
+export const DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS = 30 as const;
 
 /** Consumer group name shared by all workers reading from priority streams */
 export const STREAM_CONSUMER_GROUP = `${NS}:workers` as const;
@@ -87,7 +91,7 @@ export const RedisKeys = {
   taskLock: (taskId: string): string => `${NS}:lock:task:${taskId}`,
 
   /**
-   * Dead-letter Stream � tasks that exhausted all retries.
+   * Dead-letter Stream — tasks that exhausted all retries.
    * Pattern:  scheduler:stream:dead-letter
    */
   deadLetterStream: (): string => `${NS}:stream:dead-letter`,
@@ -100,14 +104,14 @@ export const RedisKeys = {
     `${NS}:worker:metrics:${workerId}`,
 
   /**
-   * Global scheduler lock � ensures a single scheduler promotes delayed tasks.
+   * Global scheduler lock — ensures a single scheduler promotes delayed tasks.
    * Pattern:  scheduler:lock:scheduler-leader
    */
   schedulerLeaderLock: (): string => `${NS}:lock:scheduler-leader`,
 } as const;
 
 // -----------------------------------------------------------------------------
-// Lua Scripts (inline � loaded once, called by SHA via EVALSHA in production)
+// Lua Scripts (inline — loaded once, called by SHA via EVALSHA in production)
 // -----------------------------------------------------------------------------
 
 /**
@@ -266,12 +270,12 @@ export async function renewTaskLock(
  *
  * @param redis    - ioredis client instance
  * @param workerId - Unique worker identifier
- * @param ttlSec   - Key TTL in seconds (defaults to WORKER_HEARTBEAT_TTL_SECONDS)
+ * @param ttlSec   - Key TTL in seconds (defaults to DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS)
  */
 export async function sendWorkerHeartbeat(
   redis: Redis,
   workerId: string,
-  ttlSec: number = WORKER_HEARTBEAT_TTL_SECONDS,
+  ttlSec: number = DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS,
 ): Promise<void> {
   const key = RedisKeys.workerHeartbeat(workerId);
   const now = new Date().toISOString();

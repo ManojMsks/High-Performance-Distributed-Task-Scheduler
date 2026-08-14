@@ -5,8 +5,8 @@
  *
  * Prisma v5 narrows $on() event types from the literal log config passed to
  * the constructor. A runtime-computed log array loses those literals and
- * collapses to `never`. We therefore create two typed clients — one for
- * development (all events) and one for production (warn + error only) — so
+ * collapses to `never`. We therefore create two typed clients â€” one for
+ * development (all events) and one for production (warn + error only) â€” so
  * TypeScript can infer the correct overloads for $on().
  */
 

@@ -2,7 +2,7 @@
  * src/config/index.ts
  *
  * Centralised, validated runtime configuration.
- * All env vars are parsed here — fail fast on startup if anything is missing.
+ * All env vars are parsed here â€” fail fast on startup if anything is missing.
  */
 
 import "dotenv/config";
@@ -37,6 +37,7 @@ const envSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   WORKER_BLOCK_TIMEOUT_MS: z.coerce.number().int().nonnegative().default(5_000),
   WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
+  WORKER_HEARTBEAT_TTL_SECONDS: z.coerce.number().int().positive().default(45),
 });
 
 function parseConfig() {

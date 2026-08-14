@@ -40,11 +40,11 @@ function safeNumber(value: unknown, fallback: number): number {
  * Simulates transactional email delivery.
  *
  * Expected payload keys:
- *   to          {string}   — recipient address (default: user@example.com)
- *   subject     {string}   — email subject
- *   body        {string}   — plain-text body
- *   simulateFailureRate {number} 0–1 — probability of failure (default 0)
- *   delayMs     {number}   — simulated send latency (default 80)
+ *   to          {string}   â€” recipient address (default: user@example.com)
+ *   subject     {string}   â€” email subject
+ *   body        {string}   â€” plain-text body
+ *   simulateFailureRate {number} 0â€“1 â€” probability of failure (default 0)
+ *   delayMs     {number}   â€” simulated send latency (default 80)
  */
 export const emailSendHandler: TaskHandlerFn = async (payload, ctx) => {
   const to          = safeString(payload["to"],      "user@example.com");
@@ -78,11 +78,11 @@ export const emailSendHandler: TaskHandlerFn = async (payload, ctx) => {
  * Simulates an image resizing pipeline (e.g., using sharp or ffmpeg).
  *
  * Expected payload keys:
- *   url        {string}  — source image URL
- *   width      {number}  — target width in px (default 800)
- *   height     {number}  — target height in px (default 600)
- *   quality    {number}  — compression quality 1–100 (default 85)
- *   delayMs    {number}  — simulated processing time per mpx (default 2)
+ *   url        {string}  â€” source image URL
+ *   width      {number}  â€” target width in px (default 800)
+ *   height     {number}  â€” target height in px (default 600)
+ *   quality    {number}  â€” compression quality 1â€“100 (default 85)
+ *   delayMs    {number}  â€” simulated processing time per mpx (default 2)
  */
 export const imageResizeHandler: TaskHandlerFn = async (payload, ctx) => {
   const url     = safeString(payload["url"],    "https://example.com/image.jpg");
@@ -115,7 +115,7 @@ export const imageResizeHandler: TaskHandlerFn = async (payload, ctx) => {
 
     if (remaining > 0) {
       await ctx.renewLock();
-      logger.debug("[Handler:image:resize] Processing…", {
+      logger.debug("[Handler:image:resize] Processingâ€¦", {
         taskId:    ctx.taskId,
         remainingMs: remaining,
       });
@@ -138,9 +138,9 @@ export const imageResizeHandler: TaskHandlerFn = async (payload, ctx) => {
  * from treating it as orphaned.
  *
  * Expected payload keys:
- *   reportType  {string} — e.g. "monthly-sales", "user-activity" (default "summary")
- *   pages       {number} — number of report pages (default 5)
- *   msPerPage   {number} — simulated compute time per page (default 200)
+ *   reportType  {string} â€” e.g. "monthly-sales", "user-activity" (default "summary")
+ *   pages       {number} â€” number of report pages (default 5)
+ *   msPerPage   {number} â€” simulated compute time per page (default 200)
  */
 export const reportGenerateHandler: TaskHandlerFn = async (payload, ctx) => {
   const reportType = safeString(payload["reportType"], "summary");

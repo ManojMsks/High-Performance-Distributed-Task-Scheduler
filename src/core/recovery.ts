@@ -13,7 +13,7 @@
  *
  * 2. recoverStalePendingEntries()
  *    Uses XPENDING to find stream entries that have been in a consumer's PEL
- *    (pending-entries list) for longer than the stale threshold — i.e., delivered
+ *    (pending-entries list) for longer than the stale threshold â€” i.e., delivered
  *    but never ACKed by a crashed worker.  These entries are XCLAIMed and then
  *    XACKed so they don't accumulate in the PEL; the Postgres-level recovery
  *    (job 1) handles re-queueing the actual task.
@@ -100,7 +100,7 @@ export class RecoveryService {
 
   private async sweep(): Promise<void> {
     try {
-      // Run both jobs concurrently — they touch different parts of the system
+      // Run both jobs concurrently â€” they touch different parts of the system
       await Promise.all([
         this.recoverOrphanedTasks(),
         this.recoverStalePendingEntries(),
@@ -115,7 +115,7 @@ export class RecoveryService {
   /**
    * Scans for tasks stuck in RUNNING state with an old lockedAt timestamp.
    * Only treats a task as truly orphaned if the owning worker's heartbeat key
-   * has expired in Redis — a slow-but-alive worker is not a stale worker.
+   * has expired in Redis â€” a slow-but-alive worker is not a stale worker.
    */
   private async recoverOrphanedTasks(): Promise<void> {
     const db          = getDb();
@@ -149,7 +149,7 @@ export class RecoveryService {
       if (task.lockedById !== null) {
         const heartbeat = await getWorkerHeartbeat(this.redis, task.lockedById);
         if (heartbeat !== null) {
-          // Heartbeat still fresh — worker is alive, just slow; skip
+          // Heartbeat still fresh â€” worker is alive, just slow; skip
           logger.debug("[Recovery] Worker still alive, skipping", {
             taskId:   task.id,
             workerId: task.lockedById,
@@ -192,7 +192,7 @@ export class RecoveryService {
           taskId:  task.id,
           level:   LogLevel.WARN,
           event:   "task.recovered",
-          message: `Orphaned task recovered — retry ${task.retryCount + 1}/${task.maxRetries} in ${backoffMs}ms`,
+          message: `Orphaned task recovered â€” retry ${task.retryCount + 1}/${task.maxRetries} in ${backoffMs}ms`,
           metadata: {
             retryAt:   retryAt.toISOString(),
             backoffMs,
@@ -207,7 +207,7 @@ export class RecoveryService {
         retryAt: retryAt.toISOString(),
       });
     } else {
-      // Max retries exhausted — send to dead-letter queue
+      // Max retries exhausted â€” send to dead-letter queue
       await this.redis.xadd(
         RedisKeys.deadLetterStream(),
         "*",
@@ -324,7 +324,7 @@ export class RecoveryService {
             entryId,
           });
         } catch (err) {
-          // Entry may have been claimed by another recovery instance — benign
+          // Entry may have been claimed by another recovery instance â€” benign
           logger.debug("[Recovery] Could not XCLAIM entry (race condition, skipping)", {
             streamKey,
             entryId,
@@ -346,7 +346,7 @@ export class RecoveryService {
   }
 
   /**
-   * Publicly exposed sweep trigger — used by the E2E verification suite
+   * Publicly exposed sweep trigger â€” used by the E2E verification suite
    * and any external health-check tooling that needs an on-demand run.
    */
   public async runSweep(): Promise<void> {

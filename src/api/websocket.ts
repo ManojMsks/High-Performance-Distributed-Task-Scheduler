@@ -1,7 +1,7 @@
 /**
  * src/api/websocket.ts
  *
- * Real-Time Metrics Gateway — Socket.IO layer over the HTTP server.
+ * Real-Time Metrics Gateway â€” Socket.IO layer over the HTTP server.
  *
  * Broadcasts two event streams to connected dashboard clients:
  *
@@ -12,7 +12,7 @@
  *     recent task status transitions.
  *
  *   "logs"  (every LOG_INTERVAL_MS)
- *     New TaskLog rows since the last broadcast — level-tagged and
+ *     New TaskLog rows since the last broadcast â€” level-tagged and
  *     ordered chronologically.
  *
  * The gateway is read-only; it never mutates state.
