@@ -38,20 +38,20 @@ import { RedisKeys } from "../infra/redis/redis-keys";
 import { createTask } from "../core/producer";
 import { WorkerService, type TaskHandlerFn } from "../core/worker";
 import { SchedulerService } from "../core/scheduler";
-import { RecoveryService }  from "../core/recovery";
+import { RecoveryService } from "../core/recovery";
 
 // -----------------------------------------------------------------------------
 // ANSI output helpers
 // -----------------------------------------------------------------------------
 
 const C = {
-  reset:  "\x1b[0m",
-  bold:   "\x1b[1m",
-  green:  "\x1b[32m",
-  red:    "\x1b[31m",
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  green: "\x1b[32m",
+  red: "\x1b[31m",
   yellow: "\x1b[33m",
-  cyan:   "\x1b[36m",
-  gray:   "\x1b[90m",
+  cyan: "\x1b[36m",
+  gray: "\x1b[90m",
 };
 
 function pass(msg: string): void { console.log(`  ${C.green}?${C.reset} ${msg}`); }
@@ -72,8 +72,8 @@ function sleep(ms: number): Promise<void> {
 async function waitFor(
   condition: () => Promise<boolean>,
   timeoutMs: number,
-  label:     string,
-  pollMs     = 500,
+  label: string,
+  pollMs = 500,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -92,10 +92,10 @@ function assert(cond: boolean, msg: string): void {
 // -----------------------------------------------------------------------------
 
 interface ScenarioResult {
-  name:    string;
-  passed:  boolean;
+  name: string;
+  passed: boolean;
   durationMs: number;
-  error?:  string;
+  error?: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -105,14 +105,14 @@ interface ScenarioResult {
 async function scenarioA(): Promise<void> {
   section("Scenario A — Immediate Multi-Priority Execution");
 
-  const db   = getDb();
+  const db = getDb();
   const tasks = await Promise.all([
-    createTask({ type: "verify:noop", payload: { label: "HIGH-1"   }, priority: TaskPriority.HIGH   }),
-    createTask({ type: "verify:noop", payload: { label: "HIGH-2"   }, priority: TaskPriority.HIGH   }),
+    createTask({ type: "verify:noop", payload: { label: "HIGH-1" }, priority: TaskPriority.HIGH }),
+    createTask({ type: "verify:noop", payload: { label: "HIGH-2" }, priority: TaskPriority.HIGH }),
     createTask({ type: "verify:noop", payload: { label: "MEDIUM-1" }, priority: TaskPriority.MEDIUM }),
     createTask({ type: "verify:noop", payload: { label: "MEDIUM-2" }, priority: TaskPriority.MEDIUM }),
-    createTask({ type: "verify:noop", payload: { label: "LOW-1"    }, priority: TaskPriority.LOW    }),
-    createTask({ type: "verify:noop", payload: { label: "LOW-2"    }, priority: TaskPriority.LOW    }),
+    createTask({ type: "verify:noop", payload: { label: "LOW-1" }, priority: TaskPriority.LOW }),
+    createTask({ type: "verify:noop", payload: { label: "LOW-2" }, priority: TaskPriority.LOW }),
   ]);
 
   const taskIds = tasks.map((t) => t.taskId);
@@ -146,14 +146,14 @@ async function scenarioA(): Promise<void> {
 async function scenarioB(scheduler: SchedulerService): Promise<void> {
   section("Scenario B — Delayed Task Scheduling");
 
-  const db         = getDb();
-  const redis      = getRedisClient();
-  const delayMs    = 4_000; // 4 s in future
+  const db = getDb();
+  const redis = getRedisClient();
+  const delayMs = 4_000; // 4 s in future
   const scheduledAt = new Date(Date.now() + delayMs);
 
   const { taskId } = await createTask({
-    type:        "verify:noop",
-    payload:     { label: "delayed-task" },
+    type: "verify:noop",
+    payload: { label: "delayed-task" },
     scheduledAt,
   });
 
@@ -200,8 +200,8 @@ async function scenarioC(scheduler: SchedulerService): Promise<void> {
   const db = getDb();
 
   const { taskId } = await createTask({
-    type:       "verify:always-fail",
-    payload:    { label: "dlq-test" },
+    type: "verify:always-fail",
+    payload: { label: "dlq-test" },
     maxRetries: 2,  // ? 3 total attempts before DEAD_LETTER
   });
 
@@ -210,7 +210,7 @@ async function scenarioC(scheduler: SchedulerService): Promise<void> {
   await waitFor(
     async () => {
       const t = await db.task.findUniqueOrThrow({
-        where:  { id: taskId },
+        where: { id: taskId },
         select: { status: true, retryCount: true },
       });
       info(`Status: ${t.status}, retryCount: ${t.retryCount}`);
@@ -228,7 +228,7 @@ async function scenarioC(scheduler: SchedulerService): Promise<void> {
   );
 
   const final = await db.task.findUniqueOrThrow({
-    where:  { id: taskId },
+    where: { id: taskId },
     select: { status: true, retryCount: true },
   });
 
@@ -260,25 +260,37 @@ async function scenarioC(scheduler: SchedulerService): Promise<void> {
 async function scenarioD(scheduler: SchedulerService, recovery: RecoveryService): Promise<void> {
   section("Scenario D — Stale Lock & Orphaned Task Recovery");
 
-  const db    = getDb();
+  const db = getDb();
   const redis = getRedisClient();
 
   // Create a task but don't enqueue it — we'll manually set it to RUNNING
   const { taskId } = await createTask({
-    type:    "verify:noop",
+    type: "verify:noop",
     payload: { label: "orphan-recovery-test" },
   });
 
   // Simulate a worker crash: set task to RUNNING with a stale lockedAt
   const staleLockTime = new Date(Date.now() - 300_000); // 5 minutes ago
-  const fakeWorkerId  = "dead-worker-00000000-0000-0000-0000-000000000000";
+  const fakeWorkerId = "dead0000-0000-0000-0000-000000000000";
+
+  // Insert the fake dead worker to satisfy the foreign key constraint
+  await db.worker.upsert({
+    where: { id: fakeWorkerId },
+    update: {},
+    create: {
+      id: fakeWorkerId,
+      hostname: "FAKE-CRASHED-HOST",
+      pid: 99999,
+      status: "OFFLINE",
+    }
+  });
 
   await db.task.update({
     where: { id: taskId },
     data: {
-      status:     TaskStatus.RUNNING,
+      status: TaskStatus.RUNNING,
       lockedById: fakeWorkerId,
-      lockedAt:   staleLockTime,
+      lockedAt: staleLockTime,
       executedAt: staleLockTime,
     },
   });
@@ -294,7 +306,7 @@ async function scenarioD(scheduler: SchedulerService, recovery: RecoveryService)
 
   // Task should now be RETRYING and in the delayed ZSET
   const afterRecovery = await db.task.findUniqueOrThrow({
-    where:  { id: taskId },
+    where: { id: taskId },
     select: { status: true, retryCount: true, lockedById: true },
   });
 
@@ -336,20 +348,20 @@ function buildWorkers(): WorkerService[] {
 
   const workers = [new WorkerService(), new WorkerService()];
   for (const w of workers) {
-    w.register("verify:noop",        noopHandler);
+    w.register("verify:noop", noopHandler);
     w.register("verify:always-fail", failingHandler);
   }
   return workers;
 }
 
 async function startServices(): Promise<{
-  workers:   WorkerService[];
+  workers: WorkerService[];
   scheduler: SchedulerService;
-  recovery:  RecoveryService;
+  recovery: RecoveryService;
 }> {
-  const workers   = buildWorkers();
+  const workers = buildWorkers();
   const scheduler = new SchedulerService();
-  const recovery  = new RecoveryService();
+  const recovery = new RecoveryService();
 
   // Start workers (non-blocking since start() now returns after init)
   await Promise.all(workers.map((w) => w.start()));
@@ -365,9 +377,9 @@ async function startServices(): Promise<{
 }
 
 async function teardown(
-  workers:   WorkerService[],
+  workers: WorkerService[],
   scheduler: SchedulerService,
-  recovery:  RecoveryService,
+  recovery: RecoveryService,
 ): Promise<void> {
   section("Teardown");
   await Promise.all(workers.map((w) => w.stop()));
