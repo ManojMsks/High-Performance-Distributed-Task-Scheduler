@@ -1,0 +1,150 @@
+// Prisma Schema for the Distributed Task Scheduler
+// Optimized for high-throughput polling with composite indexes
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+enum TaskStatus {
+  PENDING      // Created, not yet enqueued
+  QUEUED       // Pushed into Redis stream, awaiting pickup
+  RUNNING      // Locked by a worker, being executed
+  COMPLETED    // Execution succeeded
+  FAILED       // Execution failed, eligible for retry
+  RETRYING     // Scheduled for re-execution (retry delay pending)
+  DEAD_LETTER  // Exhausted max retries, moved to DLQ
+  CANCELLED    // Cancelled before execution
+}
+
+enum TaskPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum WorkerStatus {
+  IDLE
+  BUSY
+  DRAINING  // Gracefully shutting down
+  OFFLINE
+}
+
+// -----------------------------------------------------------------------------
+// Task Model
+// Core entity — every job runs as a Task record.
+// -----------------------------------------------------------------------------
+
+model Task {
+  id          String       @id @default(uuid())
+  type        String       // Handler identifier, e.g. "send-email", "resize-image"
+  status      TaskStatus   @default(PENDING)
+  priority    TaskPriority @default(MEDIUM)
+
+  // Serialised JSON payload consumed by the task handler
+  payload     Json
+
+  // Serialised JSON result (on success) or error detail (on failure)
+  result      Json?
+
+  // Retry bookkeeping
+  retryCount  Int          @default(0)
+  maxRetries  Int          @default(3)
+
+  // Scheduling
+  scheduledAt DateTime     @default(now())  // Earliest wall-clock time to run
+  executedAt  DateTime?                     // When worker started execution
+  completedAt DateTime?                     // When execution finished (success/failure)
+
+  // Distributed locking — worker holds identity + timestamp of lock acquisition
+  lockedById  String?      // UUID of the worker that owns the lock
+  lockedAt    DateTime?    // Timestamp when lock was acquired (used for stale-lock detection)
+
+  // Timestamps
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  logs        TaskLog[]
+  worker      Worker?      @relation(fields: [lockedById], references: [id])
+
+  // -- Indexes -----------------------------------------------------------------
+  // Primary polling index: schedulers scan (status, priority, scheduledAt)
+  @@index([status, priority, scheduledAt])
+  // Stale-lock recovery: find tasks stuck in RUNNING beyond heartbeat TTL
+  @@index([status, lockedAt])
+  // Worker-scoped queries
+  @@index([lockedById])
+  // Type-based filtering for monitoring dashboards
+  @@index([type, status])
+  // Scheduled time + status for delayed task promotion
+  @@index([scheduledAt, status])
+
+  @@map("tasks")
+}
+
+// -----------------------------------------------------------------------------
+// Worker Model
+// Represents a running worker process. Heartbeat-based liveness.
+// -----------------------------------------------------------------------------
+
+model Worker {
+  id           String       @id @default(uuid())
+  hostname     String                         // Process host
+  pid          Int                            // OS process ID
+  status       WorkerStatus @default(IDLE)
+  concurrency  Int          @default(1)       // Max parallel tasks this worker handles
+  lastHeartbeatAt DateTime  @default(now())   // Updated every heartbeat interval
+
+  // Timestamps
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Relations
+  tasks        Task[]
+
+  @@index([status, lastHeartbeatAt])
+
+  @@map("workers")
+}
+
+// -----------------------------------------------------------------------------
+// TaskLog Model
+// Append-only audit trail for every state transition and notable event.
+// -----------------------------------------------------------------------------
+
+model TaskLog {
+  id        String     @id @default(uuid())
+  taskId    String
+  workerId  String?    // Which worker emitted the log (null for system events)
+
+  level     LogLevel   @default(INFO)
+  event     String     // e.g. "task.queued", "task.started", "task.failed"
+  message   String
+  metadata  Json?      // Arbitrary structured context (error stacks, durations, etc.)
+
+  createdAt DateTime   @default(now())
+
+  // Relations
+  task      Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([workerId, createdAt])
+
+  @@map("task_logs")
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}

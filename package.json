@@ -1,0 +1,68 @@
+{
+    "name":  "distributed-task-scheduler",
+    "version":  "1.0.0",
+    "description":  "Production-grade distributed task scheduler and execution engine",
+    "main":  "dist/index.js",
+    "scripts":  {
+                    "build":  "tsc --project tsconfig.json",
+                    "dev":  "ts-node-dev --respawn --transpile-only --project tsconfig.json src/index.ts",
+                    "start":  "node dist/index.js",
+                    "worker":  "ts-node-dev --respawn --transpile-only --project tsconfig.json src/worker.ts",
+                    "scheduler":  "ts-node-dev --respawn --transpile-only --project tsconfig.json src/scheduler.ts",
+                    "prisma:generate":  "prisma generate",
+                    "prisma:migrate":  "prisma migrate dev",
+                    "prisma:migrate:deploy":  "prisma migrate deploy",
+                    "prisma:studio":  "prisma studio",
+                    "prisma:reset":  "prisma migrate reset --force",
+                    "lint":  "eslint \u0027src/**/*.ts\u0027 --fix",
+                    "test":  "jest --runInBand --forceExit",
+                    "test:watch":  "jest --watch",
+                    "test:coverage":  "jest --coverage",
+                    "admin":  "ts-node --transpile-only --project tsconfig.json src/cli/admin.ts",
+                    "verify":  "ts-node-dev --transpile-only --project tsconfig.json src/scripts/verify-engine.ts",
+                    "recovery":  "ts-node-dev --respawn --transpile-only --project tsconfig.json src/recovery-service.ts",
+                    "start:worker":  "node dist/worker.js",
+                    "start:scheduler":  "node dist/scheduler.js",
+                    "start:recovery":  "node dist/recovery-service.js"
+                },
+    "keywords":  [
+                     "distributed",
+                     "task-scheduler",
+                     "redis",
+                     "postgresql",
+                     "typescript",
+                     "job-queue"
+                 ],
+    "author":  "",
+    "license":  "MIT",
+    "dependencies":  {
+                         "@prisma/client":  "^5.22.0",
+                         "dotenv":  "^16.4.5",
+                         "express":  "^4.21.1",
+                         "express-async-errors":  "^3.1.1",
+                         "ioredis":  "^5.4.1",
+                         "socket.io":  "^4.8.3",
+                         "uuid":  "^10.0.0",
+                         "winston":  "^3.17.0",
+                         "winston-daily-rotate-file":  "^5.0.0",
+                         "zod":  "^3.23.8"
+                     },
+    "devDependencies":  {
+                            "@types/express":  "^5.0.0",
+                            "@types/jest":  "^29.5.14",
+                            "@types/node":  "^22.9.0",
+                            "@types/uuid":  "^10.0.0",
+                            "@typescript-eslint/eslint-plugin":  "^8.15.0",
+                            "@typescript-eslint/parser":  "^8.15.0",
+                            "eslint":  "^9.15.0",
+                            "jest":  "^29.7.0",
+                            "prisma":  "^5.22.0",
+                            "ts-jest":  "^29.2.5",
+                            "ts-node":  "^10.9.2",
+                            "ts-node-dev":  "^2.0.0",
+                            "typescript":  "^5.7.2"
+                        },
+    "engines":  {
+                    "node":  "\u003e=20.0.0"
+                }
+}

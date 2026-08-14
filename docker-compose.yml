@@ -1,0 +1,192 @@
+# -----------------------------------------------------------------------------
+# Distributed Task Scheduler — Multi-Container Orchestration
+#
+# Services:
+#   postgres   — PostgreSQL 16 (single source of truth)
+#   redis      — Redis 7.2 (hot path: streams, locks, heartbeats)
+#   migrate    — One-shot Prisma migration runner (exits after deploy)
+#   api        — Express REST API + Socket.IO dashboard (port 3000)
+#   scheduler  — Single-instance leader scheduler (promotes delayed tasks)
+#   worker     — Stateless execution engine  — scale: --scale worker=N
+#   recovery   — Stale lock / orphaned task sweeper
+#
+# Usage:
+#   docker compose up -d
+#   docker compose up -d --scale worker=3   # run 3 worker replicas
+#   docker compose logs -f worker
+# -----------------------------------------------------------------------------
+
+services:
+
+  # -- Infrastructure ----------------------------------------------------------
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-scheduler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scheduler_secret}
+      POSTGRES_DB:       ${POSTGRES_DB:-task_scheduler}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:         ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scheduler} -d ${POSTGRES_DB:-task_scheduler}"]
+      interval:     5s
+      timeout:      5s
+      retries:      10
+      start_period: 10s
+    networks:
+      - scheduler-net
+
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf
+    volumes:
+      - ./docker/redis/redis.conf:/etc/redis/redis.conf:ro
+      - redisdata:/data
+    healthcheck:
+      test:         ["CMD", "redis-cli", "ping"]
+      interval:     5s
+      timeout:      3s
+      retries:      10
+      start_period: 5s
+    networks:
+      - scheduler-net
+
+  # -- One-shot migration runner ------------------------------------------------
+
+  migrate:
+    build:
+      context: .
+      target:  production
+    command: >
+      sh -c "npx prisma migrate deploy && echo 'Migrations applied.'"
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-scheduler}:${POSTGRES_PASSWORD:-scheduler_secret}@postgres:5432/${POSTGRES_DB:-task_scheduler}?schema=public"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - scheduler-net
+
+  # -- Application services ----------------------------------------------------
+
+  api:
+    build:
+      context: .
+      target:  production
+    command: node dist/index.js
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV:          production
+      PORT:              "3000"
+      DATABASE_URL:      "postgresql://${POSTGRES_USER:-scheduler}:${POSTGRES_PASSWORD:-scheduler_secret}@postgres:5432/${POSTGRES_DB:-task_scheduler}?schema=public"
+      REDIS_HOST:        redis
+      REDIS_PORT:        "6379"
+      REDIS_PASSWORD:    "${REDIS_PASSWORD:-}"
+      LOG_LEVEL:         "${LOG_LEVEL:-info}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scheduler-net
+    healthcheck:
+      test:     ["CMD-SHELL", "wget -qO- http://localhost:3000/v1/health || exit 1"]
+      interval: 15s
+      timeout:  5s
+      retries:  5
+
+  scheduler:
+    build:
+      context: .
+      target:  production
+    command: node dist/scheduler.js
+    environment:
+      NODE_ENV:                     production
+      DATABASE_URL:                 "postgresql://${POSTGRES_USER:-scheduler}:${POSTGRES_PASSWORD:-scheduler_secret}@postgres:5432/${POSTGRES_DB:-task_scheduler}?schema=public"
+      REDIS_HOST:                   redis
+      REDIS_PORT:                   "6379"
+      REDIS_PASSWORD:               "${REDIS_PASSWORD:-}"
+      SCHEDULER_POLL_INTERVAL_MS:   "${SCHEDULER_POLL_INTERVAL_MS:-1000}"
+      SCHEDULER_BATCH_SIZE:         "${SCHEDULER_BATCH_SIZE:-100}"
+      LOG_LEVEL:                    "${LOG_LEVEL:-info}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scheduler-net
+    # Only ONE scheduler should hold the leader lock; additional replicas
+    # stand by but the distributed lock prevents double-promotion.
+    deploy:
+      replicas: 1
+
+  worker:
+    build:
+      context: .
+      target:  production
+    command: node dist/worker.js
+    environment:
+      NODE_ENV:                  production
+      DATABASE_URL:              "postgresql://${POSTGRES_USER:-scheduler}:${POSTGRES_PASSWORD:-scheduler_secret}@postgres:5432/${POSTGRES_DB:-task_scheduler}?schema=public"
+      REDIS_HOST:                redis
+      REDIS_PORT:                "6379"
+      REDIS_PASSWORD:            "${REDIS_PASSWORD:-}"
+      WORKER_CONCURRENCY:        "${WORKER_CONCURRENCY:-5}"
+      WORKER_HEARTBEAT_INTERVAL_MS: "${WORKER_HEARTBEAT_INTERVAL_MS:-15000}"
+      LOG_LEVEL:                 "${LOG_LEVEL:-info}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scheduler-net
+    # Scale horizontally:
+    #   docker compose up -d --scale worker=3
+
+  recovery:
+    build:
+      context: .
+      target:  production
+    command: node dist/recovery-service.js
+    environment:
+      NODE_ENV:                      production
+      DATABASE_URL:                  "postgresql://${POSTGRES_USER:-scheduler}:${POSTGRES_PASSWORD:-scheduler_secret}@postgres:5432/${POSTGRES_DB:-task_scheduler}?schema=public"
+      REDIS_HOST:                    redis
+      REDIS_PORT:                    "6379"
+      REDIS_PASSWORD:                "${REDIS_PASSWORD:-}"
+      RECOVERY_POLL_INTERVAL_MS:     "${RECOVERY_POLL_INTERVAL_MS:-30000}"
+      STALE_LOCK_THRESHOLD_SECONDS:  "${STALE_LOCK_THRESHOLD_SECONDS:-90}"
+      LOG_LEVEL:                     "${LOG_LEVEL:-info}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scheduler-net
+
+# -- Persistent volumes ------------------------------------------------------
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+
+# -- Network -----------------------------------------------------------------
+
+networks:
+  scheduler-net:
+    driver: bridge

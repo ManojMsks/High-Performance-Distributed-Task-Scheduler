@@ -1,0 +1,565 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Task Scheduler — Live Dashboard</title>
+  <meta name="description" content="Real-time monitoring dashboard for the Distributed Task Scheduler & Execution Engine." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+          colors: {
+            surface: { 0: '#080c14', 1: '#0d1117', 2: '#161b22', 3: '#21262d' },
+            accent:  { blue: '#58a6ff', green: '#3fb950', red: '#f85149', yellow: '#d29922', purple: '#bc8cff' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #080c14; font-family: 'Inter', sans-serif; }
+
+    /* Glass card */
+    .glass {
+      background: rgba(22, 27, 34, 0.85);
+      border: 1px solid rgba(48, 54, 61, 0.8);
+      backdrop-filter: blur(12px);
+      border-radius: 12px;
+    }
+    .glass:hover { border-color: rgba(88, 166, 255, 0.3); }
+
+    /* Pulsing live dot */
+    @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.85)} }
+    .live-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+    /* Number flip animation */
+    @keyframes num-pop { 0%{transform:scale(1)} 40%{transform:scale(1.18)} 100%{transform:scale(1)} }
+    .num-pop { animation: num-pop .35s cubic-bezier(.36,.07,.19,.97); }
+
+    /* Queue depth bar */
+    .depth-bar { transition: width .6s cubic-bezier(.4,0,.2,1); }
+
+    /* Log feed */
+    #log-feed { max-height: 320px; overflow-y: auto; scroll-behavior: smooth; }
+    #log-feed::-webkit-scrollbar { width: 4px; }
+    #log-feed::-webkit-scrollbar-track { background: transparent; }
+    #log-feed::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+
+    /* Modal backdrop */
+    .modal-bg { background: rgba(8,12,20,.85); backdrop-filter: blur(8px); }
+
+    /* Status badge */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 9999px; font-size: .7rem; font-weight: 600;
+      letter-spacing: .03em; text-transform: uppercase;
+    }
+    .badge-green  { background: rgba(63,185,80,.15); color: #3fb950; border:1px solid rgba(63,185,80,.3); }
+    .badge-blue   { background: rgba(88,166,255,.15); color: #58a6ff; border:1px solid rgba(88,166,255,.3); }
+    .badge-yellow { background: rgba(210,153,34,.15); color: #d29922; border:1px solid rgba(210,153,34,.3); }
+    .badge-red    { background: rgba(248,81,73,.15);  color: #f85149; border:1px solid rgba(248,81,73,.3); }
+    .badge-gray   { background: rgba(139,148,158,.1); color: #8b949e; border:1px solid rgba(139,148,158,.2); }
+    .badge-purple { background: rgba(188,140,255,.15); color: #bc8cff; border:1px solid rgba(188,140,255,.3); }
+
+    /* Glow effects on stat cards */
+    .card-high   { box-shadow: 0 0 24px rgba(248,81,73,.08); }
+    .card-medium { box-shadow: 0 0 24px rgba(210,153,34,.08); }
+    .card-low    { box-shadow: 0 0 24px rgba(88,166,255,.08); }
+    .card-delay  { box-shadow: 0 0 24px rgba(188,140,255,.08); }
+    .card-dlq    { box-shadow: 0 0 24px rgba(248,81,73,.12); }
+
+    input, textarea, select {
+      background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+      border-radius: 8px; padding: 8px 12px; width: 100%; font-family: inherit;
+      outline: none; transition: border-color .2s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #58a6ff; }
+    textarea { font-family: 'JetBrains Mono', monospace; font-size: .85rem; resize: vertical; }
+  </style>
+</head>
+
+<body class="text-gray-300 min-h-screen">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header class="glass mx-4 mt-4 px-6 py-4 flex items-center justify-between sticky top-4 z-40">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">⚡</div>
+      <div>
+        <h1 class="text-white font-semibold text-base leading-none">Distributed Task Scheduler</h1>
+        <p class="text-gray-500 text-xs mt-0.5">Execution Engine — Live Dashboard</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <div id="conn-status" class="flex items-center gap-2 text-xs">
+        <div id="conn-dot" class="live-dot w-2 h-2 rounded-full bg-gray-500"></div>
+        <span id="conn-text" class="text-gray-500">Connecting…</span>
+      </div>
+      <button id="open-modal"
+        class="bg-accent-blue hover:bg-blue-400 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
+        <span>＋</span> Create Task
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Queue Depth Cards ───────────────────────────────────────────────── -->
+  <section class="px-4 mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+
+    <div class="glass card-high p-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="badge badge-red">HIGH</span>
+        <span class="text-xs text-gray-500">stream</span>
+      </div>
+      <p class="text-3xl font-bold text-white font-mono" id="q-high">—</p>
+      <div class="mt-2 h-1.5 rounded-full bg-surface-3 overflow-hidden">
+        <div id="bar-high" class="depth-bar h-full rounded-full bg-accent-red" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="glass card-medium p-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="badge badge-yellow">MEDIUM</span>
+        <span class="text-xs text-gray-500">stream</span>
+      </div>
+      <p class="text-3xl font-bold text-white font-mono" id="q-medium">—</p>
+      <div class="mt-2 h-1.5 rounded-full bg-surface-3 overflow-hidden">
+        <div id="bar-medium" class="depth-bar h-full rounded-full bg-accent-yellow" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="glass card-low p-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="badge badge-blue">LOW</span>
+        <span class="text-xs text-gray-500">stream</span>
+      </div>
+      <p class="text-3xl font-bold text-white font-mono" id="q-low">—</p>
+      <div class="mt-2 h-1.5 rounded-full bg-surface-3 overflow-hidden">
+        <div id="bar-low" class="depth-bar h-full rounded-full bg-accent-blue" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="glass card-delay p-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="badge badge-purple">DELAYED</span>
+        <span class="text-xs text-gray-500">zset</span>
+      </div>
+      <p class="text-3xl font-bold text-white font-mono" id="q-delayed">—</p>
+      <div class="mt-2 h-1.5 rounded-full bg-surface-3 overflow-hidden">
+        <div id="bar-delayed" class="depth-bar h-full rounded-full bg-accent-purple" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="glass card-dlq p-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="badge badge-red">DLQ</span>
+        <span class="text-xs text-gray-500">dead-letter</span>
+      </div>
+      <p class="text-3xl font-bold text-white font-mono" id="q-dlq">—</p>
+      <div class="mt-2 h-1.5 rounded-full bg-surface-3 overflow-hidden">
+        <div id="bar-dlq" class="depth-bar h-full rounded-full bg-red-700" style="width:0%"></div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ── Workers + Task Status Chart ────────────────────────────────────── -->
+  <section class="px-4 mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+    <!-- Workers -->
+    <div class="glass p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-white font-semibold">Active Workers</h2>
+        <span id="worker-count-badge" class="badge badge-green">0 online</span>
+      </div>
+      <div id="worker-list" class="space-y-2 text-sm text-gray-400">
+        <p class="text-gray-500 text-xs">Waiting for data…</p>
+      </div>
+    </div>
+
+    <!-- Task status donut -->
+    <div class="glass p-5 flex flex-col">
+      <h2 class="text-white font-semibold mb-4">Task Status Breakdown</h2>
+      <div class="flex-1 flex items-center justify-center" style="min-height:200px">
+        <canvas id="status-chart" style="max-height:220px;max-width:220px"></canvas>
+      </div>
+      <div id="status-legend" class="flex flex-wrap gap-2 mt-4 text-xs text-gray-400"></div>
+    </div>
+
+  </section>
+
+  <!-- ── Recent Transitions ──────────────────────────────────────────────── -->
+  <section class="px-4 mt-4">
+    <div class="glass p-5">
+      <h2 class="text-white font-semibold mb-3">Recent Task Transitions</h2>
+      <div id="transitions" class="space-y-1 text-xs font-mono text-gray-400">
+        <p class="text-gray-500">No recent transitions…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Live Execution Log ──────────────────────────────────────────────── -->
+  <section class="px-4 mt-4 mb-4">
+    <div class="glass p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-white font-semibold">Live Execution Log</h2>
+        <div class="flex items-center gap-3">
+          <span id="log-count" class="text-gray-500 text-xs">0 entries</span>
+          <button id="clear-logs" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">Clear</button>
+          <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+            <input type="checkbox" id="autoscroll" checked class="accent-blue-500" style="width:auto" />
+            Auto-scroll
+          </label>
+        </div>
+      </div>
+      <div id="log-feed" class="font-mono text-xs space-y-0.5 bg-surface-0 rounded-lg p-3">
+        <p class="text-gray-600">Waiting for log entries…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Create Task Modal ───────────────────────────────────────────────── -->
+  <div id="modal" class="fixed inset-0 modal-bg z-50 hidden items-center justify-center p-4">
+    <div class="glass w-full max-w-md p-6 relative">
+      <button id="close-modal" class="absolute top-4 right-4 text-gray-500 hover:text-white text-xl leading-none">✕</button>
+      <h2 class="text-white font-semibold text-lg mb-5">Create New Task</h2>
+
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">Task Type *</label>
+          <input id="t-type" type="text" placeholder="e.g. email:send, image:resize" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">Priority</label>
+          <select id="t-priority">
+            <option value="HIGH">HIGH</option>
+            <option value="MEDIUM" selected>MEDIUM</option>
+            <option value="LOW">LOW</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">Payload (JSON)</label>
+          <textarea id="t-payload" rows="4" placeholder='{ "to": "user@example.com" }'>{ }</textarea>
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">Schedule At (optional — leave blank for immediate)</label>
+          <input id="t-schedule" type="datetime-local" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">Max Retries</label>
+          <input id="t-retries" type="number" min="0" max="20" value="3" />
+        </div>
+      </div>
+
+      <div id="modal-error" class="mt-3 text-xs text-accent-red hidden"></div>
+      <div id="modal-success" class="mt-3 text-xs text-accent-green hidden"></div>
+
+      <div class="mt-5 flex gap-3 justify-end">
+        <button id="cancel-modal" class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">Cancel</button>
+        <button id="submit-task"
+          class="px-5 py-2 bg-accent-blue hover:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors">
+          Create Task
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── JavaScript ──────────────────────────────────────────────────────── -->
+  <script>
+  (function () {
+    'use strict';
+
+    // ── Chart.js setup ────────────────────────────────────────────────────
+
+    const STATUS_COLORS = {
+      PENDING:     '#58a6ff',
+      QUEUED:      '#79c0ff',
+      RUNNING:     '#3fb950',
+      COMPLETED:   '#2ea043',
+      RETRYING:    '#d29922',
+      FAILED:      '#f85149',
+      DEAD_LETTER: '#8b1a1a',
+      CANCELLED:   '#484f58',
+    };
+    const STATUS_ORDER = ['RUNNING','QUEUED','PENDING','RETRYING','COMPLETED','FAILED','DEAD_LETTER','CANCELLED'];
+
+    const chartCtx = document.getElementById('status-chart').getContext('2d');
+    const statusChart = new Chart(chartCtx, {
+      type: 'doughnut',
+      data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 2, borderColor: '#161b22' }] },
+      options: {
+        cutout: '68%',
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: (ctx) => ` ${ctx.label}: ${ctx.parsed.toLocaleString()}` }
+        }},
+        animation: { animateRotate: true, duration: 600 },
+      }
+    });
+
+    function updateStatusChart(byStatus) {
+      const labels = STATUS_ORDER.filter(s => byStatus[s] > 0);
+      const data   = labels.map(s => byStatus[s] || 0);
+      const colors = labels.map(s => STATUS_COLORS[s] || '#484f58');
+
+      statusChart.data.labels = labels;
+      statusChart.data.datasets[0].data = data;
+      statusChart.data.datasets[0].backgroundColor = colors;
+      statusChart.update('none');
+
+      const legend = document.getElementById('status-legend');
+      legend.innerHTML = labels.map((s, i) =>
+        `<span style="color:${colors[i]}" class="flex items-center gap-1">
+          <span style="width:8px;height:8px;border-radius:50%;background:${colors[i]};display:inline-block"></span>
+          ${s.replace('_',' ')} (${data[i].toLocaleString()})
+        </span>`
+      ).join('');
+    }
+
+    // ── Queue depth helpers ───────────────────────────────────────────────
+
+    const qCells  = { high: 'q-high', medium: 'q-medium', low: 'q-low', delayed: 'q-delayed', dlq: 'q-dlq' };
+    const barCells = { high: 'bar-high', medium: 'bar-medium', low: 'bar-low', delayed: 'bar-delayed', dlq: 'bar-dlq' };
+    const prevQueues = { high: -1, medium: -1, low: -1, delayed: -1, dlq: -1 };
+
+    function updateQueues(queues) {
+      const max = Math.max(1, queues.high + queues.medium + queues.low, 20);
+      Object.entries(qCells).forEach(([key, id]) => {
+        const val  = queues[key] ?? 0;
+        const el   = document.getElementById(id);
+        const bar  = document.getElementById(barCells[key]);
+        if (prevQueues[key] !== val) {
+          el.textContent = val.toLocaleString();
+          el.classList.remove('num-pop');
+          void el.offsetWidth; // reflow
+          el.classList.add('num-pop');
+          prevQueues[key] = val;
+        }
+        bar.style.width = Math.min(100, (val / max) * 100) + '%';
+      });
+    }
+
+    // ── Workers ───────────────────────────────────────────────────────────
+
+    function statusBadge(s) {
+      const map = { IDLE:'badge-blue', BUSY:'badge-green', DRAINING:'badge-yellow', OFFLINE:'badge-gray' };
+      return `<span class="badge ${map[s]||'badge-gray'}">${s}</span>`;
+    }
+
+    function updateWorkers({ count, list }) {
+      document.getElementById('worker-count-badge').textContent = `${count} online`;
+      const container = document.getElementById('worker-list');
+      if (list.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-xs">No active workers</p>';
+        return;
+      }
+      container.innerHTML = list.map(w => `
+        <div class="flex items-center justify-between py-2 border-b border-surface-3 last:border-0">
+          <div>
+            <span class="text-gray-300 font-medium">${w.hostname}</span>
+            <span class="text-gray-600 text-xs ml-2">pid ${w.pid}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-gray-500 text-xs">concurrency: ${w.concurrency}</span>
+            ${w.heartbeatAgeSeconds !== null ? `<span class="text-gray-600 text-xs">${w.heartbeatAgeSeconds}s ago</span>` : ''}
+            ${statusBadge(w.status)}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // ── Transitions ───────────────────────────────────────────────────────
+
+    const MAX_TRANSITIONS = 12;
+    let transitions = [];
+
+    function priorityColor(p) { return { HIGH:'text-red-400', MEDIUM:'text-yellow-400', LOW:'text-blue-400' }[p] || 'text-gray-400'; }
+    function statusColor(s)   {
+      if (s === 'COMPLETED') return 'text-green-400';
+      if (s === 'RUNNING')   return 'text-green-300';
+      if (s === 'FAILED' || s === 'DEAD_LETTER') return 'text-red-400';
+      if (s === 'RETRYING')  return 'text-yellow-400';
+      return 'text-gray-400';
+    }
+
+    function addTransitions(items) {
+      if (!items || items.length === 0) return;
+      transitions = [...items, ...transitions].slice(0, MAX_TRANSITIONS);
+      const container = document.getElementById('transitions');
+      container.innerHTML = transitions.map(t => {
+        const ts = new Date(t.updatedAt).toLocaleTimeString();
+        return `<div class="flex gap-3 py-0.5">
+          <span class="text-gray-600 shrink-0">${ts}</span>
+          <span class="${priorityColor(t.priority)} shrink-0 w-14">${t.priority}</span>
+          <span class="text-gray-500 truncate max-w-xs">${t.type}</span>
+          <span class="${statusColor(t.status)} ml-auto shrink-0">${t.status}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // ── Log feed ──────────────────────────────────────────────────────────
+
+    const MAX_LOGS = 200;
+    let logCount = 0;
+    const logFeed = document.getElementById('log-feed');
+
+    function levelColor(l) {
+      return { INFO:'text-gray-300', WARN:'text-yellow-400', ERROR:'text-red-400', DEBUG:'text-gray-500' }[l] || 'text-gray-400';
+    }
+
+    function appendLogs(entries) {
+      if (!entries || entries.length === 0) return;
+      const wasEmpty = logFeed.querySelector('p.text-gray-600');
+      if (wasEmpty) logFeed.innerHTML = '';
+
+      entries.forEach(e => {
+        logCount++;
+        const ts  = new Date(e.createdAt).toLocaleTimeString('en-GB', { hour12: false });
+        const row = document.createElement('div');
+        row.className = 'flex gap-2 leading-5 hover:bg-surface-2 px-1 rounded';
+        row.innerHTML = `
+          <span class="text-gray-600 shrink-0 select-none">${ts}</span>
+          <span class="${levelColor(e.level)} shrink-0 w-10">${e.level}</span>
+          <span class="text-purple-400 shrink-0 max-w-28 truncate" title="${e.taskId}">${e.taskId.slice(0,8)}</span>
+          <span class="text-gray-400 truncate">${escHtml(e.message)}</span>`;
+        logFeed.appendChild(row);
+      });
+
+      // Trim to MAX_LOGS
+      while (logFeed.childElementCount > MAX_LOGS) logFeed.removeChild(logFeed.firstChild);
+
+      document.getElementById('log-count').textContent = `${logCount} entries`;
+
+      if (document.getElementById('autoscroll').checked) {
+        logFeed.scrollTop = logFeed.scrollHeight;
+      }
+    }
+
+    document.getElementById('clear-logs').onclick = () => {
+      logFeed.innerHTML = '<p class="text-gray-600">Log cleared.</p>';
+      logCount = 0;
+      document.getElementById('log-count').textContent = '0 entries';
+    };
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ── Socket.IO connection ──────────────────────────────────────────────
+
+    const socket = io({ transports: ['websocket', 'polling'] });
+    const connDot  = document.getElementById('conn-dot');
+    const connText = document.getElementById('conn-text');
+
+    socket.on('connect', () => {
+      connDot.className  = 'live-dot w-2 h-2 rounded-full bg-green-400';
+      connText.textContent = 'Connected';
+      connText.className = 'text-green-400 text-xs';
+    });
+    socket.on('disconnect', () => {
+      connDot.className  = 'w-2 h-2 rounded-full bg-red-400';
+      connText.textContent = 'Disconnected';
+      connText.className = 'text-red-400 text-xs';
+    });
+    socket.on('connect_error', () => {
+      connDot.className  = 'w-2 h-2 rounded-full bg-yellow-400';
+      connText.textContent = 'Reconnecting…';
+      connText.className = 'text-yellow-400 text-xs';
+    });
+
+    socket.on('metrics', (data) => {
+      updateQueues(data.queues);
+      updateWorkers(data.workers);
+      updateStatusChart(data.tasks.byStatus || {});
+      addTransitions(data.recentTransitions);
+    });
+
+    socket.on('logs', (entries) => {
+      appendLogs(entries);
+    });
+
+    // ── Create Task Modal ─────────────────────────────────────────────────
+
+    const modal       = document.getElementById('modal');
+    const openBtn     = document.getElementById('open-modal');
+    const closeBtn    = document.getElementById('close-modal');
+    const cancelBtn   = document.getElementById('cancel-modal');
+    const submitBtn   = document.getElementById('submit-task');
+    const modalError  = document.getElementById('modal-error');
+    const modalSuccess = document.getElementById('modal-success');
+
+    function showModal()  { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+    function hideModal()  { modal.classList.add('hidden');    modal.classList.remove('flex'); modalError.classList.add('hidden'); modalSuccess.classList.add('hidden'); }
+
+    openBtn.onclick  = showModal;
+    closeBtn.onclick = hideModal;
+    cancelBtn.onclick = hideModal;
+    modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
+
+    submitBtn.onclick = async () => {
+      modalError.classList.add('hidden');
+      modalSuccess.classList.add('hidden');
+
+      const type     = document.getElementById('t-type').value.trim();
+      const priority = document.getElementById('t-priority').value;
+      const retries  = parseInt(document.getElementById('t-retries').value, 10);
+      const schedVal = document.getElementById('t-schedule').value;
+      let   payload;
+
+      if (!type) { showErr('Task type is required.'); return; }
+
+      try {
+        payload = JSON.parse(document.getElementById('t-payload').value || '{}');
+      } catch {
+        showErr('Payload must be valid JSON.'); return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating…';
+
+      try {
+        const body = { type, payload, priority, maxRetries: retries };
+        if (schedVal) body.scheduledAt = new Date(schedVal).toISOString();
+
+        const resp = await fetch('/v1/tasks', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(body),
+        });
+        const json = await resp.json();
+
+        if (!resp.ok) {
+          showErr(json.error?.message || 'Request failed.');
+        } else {
+          modalSuccess.textContent = `✓ Task created: ${json.taskId} (${json.status})`;
+          modalSuccess.classList.remove('hidden');
+          setTimeout(hideModal, 2000);
+        }
+      } catch (err) {
+        showErr('Network error — is the API running?');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Task';
+      }
+    };
+
+    function showErr(msg) {
+      modalError.textContent = msg;
+      modalError.classList.remove('hidden');
+    }
+
+    // Keyboard shortcut: N to open modal, Esc to close
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideModal();
+      if (e.key === 'n' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') showModal();
+    });
+
+  }());
+  </script>
+</body>
+</html>
