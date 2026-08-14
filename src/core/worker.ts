@@ -208,7 +208,7 @@ export class WorkerService {
 
     for (const streamKey of streams) {
       try {
-        await this.redis.xgroup("CREATE", streamKey, STREAM_CONSUMER_GROUP, "$", "MKSTREAM");
+        await this.redis.xgroup("CREATE", streamKey, STREAM_CONSUMER_GROUP, "0", "MKSTREAM");
         logger.debug("[Worker] Consumer group created", { streamKey });
       } catch (err) {
         const message = (err as Error).message;
@@ -233,21 +233,31 @@ export class WorkerService {
   // -- Consumer loop ----------------------------------------------------------
 
   private async runConsumerLoop(): Promise<void> {
+    logger.info(`[Worker ${this.workerId}] Starting consumer polling loop...`);
     while (this.running) {
-      // Back-pressure: yield when all concurrency slots are busy
-      if (this.activeCount >= this.concurrency) {
-        await sleep(50);
-        continue;
-      }
+      try {
+        // Back-pressure: yield when all concurrency slots are busy
+        if (this.activeCount >= this.concurrency) {
+          await sleep(50);
+          continue;
+        }
 
-      const slotsAvailable = this.concurrency - this.activeCount;
-      const messages = await this.fetchMessages(Math.min(slotsAvailable, 10));
+        const slotsAvailable = this.concurrency - this.activeCount;
+        const messages = await this.fetchMessages(Math.min(slotsAvailable, 10));
 
-      for (const msg of messages) {
-        if (!this.running) break;
-        this.activeCount++;
-        // Fire-and-forget; decrement counter in finally to maintain semaphore
-        void this.processMessage(msg).finally(() => { this.activeCount--; });
+        if (messages.length > 0) {
+          logger.debug(`[Worker ${this.workerId}] Fetched ${messages.length} messages`);
+        }
+
+        for (const msg of messages) {
+          if (!this.running) break;
+          this.activeCount++;
+          // Fire-and-forget; decrement counter in finally to maintain semaphore
+          void this.processMessage(msg).finally(() => { this.activeCount--; });
+        }
+      } catch (err) {
+        logger.error(`[Worker ${this.workerId}] Uncaught error in consumer loop`, err);
+        await sleep(1000);
       }
     }
 
@@ -267,6 +277,7 @@ export class WorkerService {
     // Non-blocking priority sweep
     for (const streamKey of [highKey, mediumKey, lowKey]) {
       try {
+        logger.debug(`[Worker ${this.workerId}] xreadgroup (non-blocking) on ${streamKey}`);
         const raw = (await this.blockingRedis.xreadgroup(
           "GROUP", STREAM_CONSUMER_GROUP, this.workerId,
           "COUNT", maxCount,
@@ -276,6 +287,7 @@ export class WorkerService {
         if (raw !== null && raw.length > 0) {
           const streamResult = raw[0];
           if (streamResult !== undefined && streamResult[1].length > 0) {
+            logger.debug(`[Worker ${this.workerId}] Received ${streamResult[1].length} messages from ${streamKey}`);
             return streamResult[1]
               .map(([id, fields]) => parseStreamEntry(streamKey, id, fields))
               .filter((m): m is ConsumedMessage => m !== null);
@@ -292,6 +304,7 @@ export class WorkerService {
 
     // All queues empty - block across all three and sort result by priority
     try {
+      logger.debug(`[Worker ${this.workerId}] xreadgroup (blocking) across all streams for ${this.blockTimeoutMs}ms...`);
       const raw = (await this.blockingRedis.xreadgroup(
         "GROUP", STREAM_CONSUMER_GROUP, this.workerId,
         "COUNT", maxCount,
@@ -304,6 +317,9 @@ export class WorkerService {
 
       const messages: ConsumedMessage[] = [];
       for (const [streamKey, entries] of raw) {
+        if (entries.length > 0) {
+          logger.debug(`[Worker ${this.workerId}] Received ${entries.length} messages from ${streamKey} (blocking)`);
+        }
         for (const [id, fields] of entries) {
           const m = parseStreamEntry(streamKey, id, fields);
           if (m !== null) messages.push(m);
@@ -329,6 +345,7 @@ export class WorkerService {
 
   private async processMessage(msg: ConsumedMessage): Promise<void> {
     const { streamKey, entryId, taskId } = msg;
+    logger.debug(`[Worker ${this.workerId}] Processing message ${entryId} for task ${taskId} from ${streamKey}`);
     const db = getDb();
 
     // 1. Load full task record
